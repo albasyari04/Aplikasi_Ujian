@@ -1,0 +1,95 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id         String   @id @default(cuid())
+  nama       String
+  email      String   @unique
+  password   String
+  role       Role     @default(SISWA)
+  nis        String?
+  kelas      String?
+  fotoProfil String?
+  createdAt  DateTime @default(now())
+
+  jawaban    Jawaban[]
+  hasilUjian HasilUjian[]
+}
+
+model Ujian {
+  id           String      @id @default(cuid())
+  judul        String
+  mapel        String
+  guru         String
+  kelas        String      // ✅ BARU: target kelas, contoh "XII IPA 1"
+  status       StatusUjian @default(DRAFT) // ✅ BARU: kontrol publish
+  tanggal      DateTime
+  waktuMulai   DateTime
+  waktuSelesai DateTime
+  durasi       Int
+  soal         Soal[]
+  hasil        HasilUjian[]
+}
+
+model Soal {
+  id           String    @id @default(cuid())
+  ujianId      String
+  nomor        Int
+  pertanyaan   String    @db.Text
+  tipe         TipeSoal  @default(PILIHAN_GANDA)
+  opsiA        String?
+  opsiB        String?
+  opsiC        String?
+  opsiD        String?
+  opsiE        String?
+  kunciJawaban String?
+  bobot        Int       @default(1)
+  ujian        Ujian     @relation(fields: [ujianId], references: [id])
+  jawaban      Jawaban[]
+}
+
+model Jawaban {
+  id      String @id @default(cuid())
+  userId  String
+  soalId  String
+  jawaban String
+  user    User   @relation(fields: [userId], references: [id])
+  soal    Soal   @relation(fields: [soalId], references: [id])
+
+  @@unique([userId, soalId])
+}
+
+model HasilUjian {
+  id        String   @id @default(cuid())
+  userId    String
+  ujianId   String
+  nilai     Float
+  lulus     Boolean
+  selesaiAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+  ujian     Ujian    @relation(fields: [ujianId], references: [id])
+}
+
+enum Role {
+  SISWA
+  GURU
+  ADMIN
+}
+
+enum TipeSoal {
+  PILIHAN_GANDA
+  ESSAY
+}
+
+// ✅ BARU: status ujian untuk kontrol publish
+enum StatusUjian {
+  DRAFT      // belum dipublish, tidak terlihat siswa
+  AKTIF      // sudah dipublish, siswa bisa melihat & mengerjakan
+  SELESAI    // sudah lewat waktu
+}

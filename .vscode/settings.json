@@ -1,0 +1,6 @@
+{
+  "tailwindCSS.validate": false,
+  "css.validate": false,
+  "tailwindCSS.experimental.classRegex": [],
+  "git.ignoreLimitWarning": true
+}
