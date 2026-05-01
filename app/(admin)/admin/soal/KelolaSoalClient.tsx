@@ -761,6 +761,123 @@ function SoalItem({ soal, onView, onDelete }: { soal: Soal; onView: (s: Soal) =>
 }
 
 // ════════════════════════════════════════════════════════════
+// MAPEL GROUP — accordion folder per mata pelajaran
+// ════════════════════════════════════════════════════════════
+const MAPEL_COLORS: Record<string, { bg: string; icon: string; badge: string; border: string; dot: string }> = {
+  default:    { bg: "from-teal-500 to-emerald-600",    icon: "text-teal-600 dark:text-teal-400",    badge: "bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border-teal-200/60 dark:border-teal-800/40",    border: "border-teal-200 dark:border-teal-800/60",    dot: "bg-teal-500" },
+  Kimia:      { bg: "from-purple-500 to-violet-600",   icon: "text-purple-600 dark:text-purple-400", badge: "bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-200/60 dark:border-purple-800/40", border: "border-purple-200 dark:border-purple-800/60", dot: "bg-purple-500" },
+  Matematika: { bg: "from-blue-500 to-indigo-600",     icon: "text-blue-600 dark:text-blue-400",     badge: "bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200/60 dark:border-blue-800/40",     border: "border-blue-200 dark:border-blue-800/60",    dot: "bg-blue-500" },
+  Fisika:     { bg: "from-cyan-500 to-sky-600",        icon: "text-cyan-600 dark:text-cyan-400",     badge: "bg-cyan-50 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-300 border-cyan-200/60 dark:border-cyan-800/40",     border: "border-cyan-200 dark:border-cyan-800/60",    dot: "bg-cyan-500" },
+  Biologi:    { bg: "from-green-500 to-emerald-600",   icon: "text-green-600 dark:text-green-400",   badge: "bg-green-50 dark:bg-green-950/40 text-green-700 dark:text-green-300 border-green-200/60 dark:border-green-800/40",   border: "border-green-200 dark:border-green-800/60",  dot: "bg-green-500" },
+  Bahasa:     { bg: "from-rose-500 to-pink-600",       icon: "text-rose-600 dark:text-rose-400",     badge: "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-200/60 dark:border-rose-800/40",     border: "border-rose-200 dark:border-rose-800/60",   dot: "bg-rose-500" },
+  Sejarah:    { bg: "from-amber-500 to-orange-600",    icon: "text-amber-600 dark:text-amber-400",   badge: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200/60 dark:border-amber-800/40",   border: "border-amber-200 dark:border-amber-800/60",  dot: "bg-amber-500" },
+  Ekonomi:    { bg: "from-lime-500 to-green-600",      icon: "text-lime-600 dark:text-lime-400",     badge: "bg-lime-50 dark:bg-lime-950/40 text-lime-700 dark:text-lime-300 border-lime-200/60 dark:border-lime-800/40",     border: "border-lime-200 dark:border-lime-800/60",   dot: "bg-lime-500" },
+  Geografi:   { bg: "from-teal-500 to-cyan-600",       icon: "text-teal-600 dark:text-teal-400",     badge: "bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border-teal-200/60 dark:border-teal-800/40",     border: "border-teal-200 dark:border-teal-800/60",   dot: "bg-teal-500" },
+}
+
+function getMapelColor(mapel: string) {
+  for (const key of Object.keys(MAPEL_COLORS)) {
+    if (key !== "default" && mapel.toLowerCase().includes(key.toLowerCase())) {
+      return MAPEL_COLORS[key]
+    }
+  }
+  return MAPEL_COLORS.default
+}
+
+function MapelGroup({
+  mapel,
+  soalList,
+  defaultOpen = false,
+  onView,
+  onDelete,
+}: {
+  mapel: string
+  soalList: Soal[]
+  defaultOpen?: boolean
+  onView: (s: Soal) => void
+  onDelete: (s: Soal) => void
+}) {
+  const [isOpen, setIsOpen] = useState(defaultOpen)
+  const color = getMapelColor(mapel)
+
+  // Group by ujian within this mapel
+  const ujianGroups = useMemo(() => {
+    const map = new Map<string, { ujian: Ujian; soalList: Soal[] }>()
+    for (const soal of soalList) {
+      const key = soal.ujianId
+      if (!map.has(key)) map.set(key, { ujian: soal.ujian, soalList: [] })
+      map.get(key)!.soalList.push(soal)
+    }
+    return Array.from(map.values())
+  }, [soalList])
+
+  const pgCount = soalList.filter((s) => s.tipe === "PILIHAN_GANDA").length
+  const essayCount = soalList.filter((s) => s.tipe === "ESSAY").length
+
+  return (
+    <div className={`rounded-2xl border ${color.border} overflow-hidden transition-all duration-200`}>
+      {/* Folder header — click to toggle */}
+      <button
+        onClick={() => setIsOpen((v) => !v)}
+        className="w-full flex items-center gap-3 px-4 py-3.5 bg-white dark:bg-zinc-900 hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-colors text-left"
+      >
+        {/* Folder icon with gradient */}
+        <div className={`flex items-center justify-center w-9 h-9 rounded-xl text-white shrink-0 bg-gradient-to-br ${color.bg} shadow-sm`}>
+          <BookOpen className="size-4" />
+        </div>
+
+        {/* Mapel name + stats */}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-black text-slate-800 dark:text-white leading-tight truncate">{mapel}</p>
+          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+            <span className="text-[10px] font-bold text-slate-400 dark:text-zinc-500">
+              {ujianGroups.length} ujian · {soalList.length} soal
+            </span>
+            {pgCount > 0 && (
+              <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-[2px] rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 border border-blue-200/60 dark:border-blue-800/40">
+                <ClipboardCheck className="size-2" /> {pgCount} PG
+              </span>
+            )}
+            {essayCount > 0 && (
+              <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-[2px] rounded-full bg-violet-50 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 border border-violet-200/60 dark:border-violet-800/40">
+                <ScrollText className="size-2" /> {essayCount} Essay
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Chevron */}
+        <ChevronDown className={`size-4 text-slate-400 dark:text-zinc-500 shrink-0 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
+      </button>
+
+      {/* Content — expandable */}
+      {isOpen && (
+        <div className="border-t border-slate-100 dark:border-zinc-800/60">
+          {ujianGroups.map((group, gi) => (
+            <div key={group.ujian.id}>
+              {/* Sub-header: ujian */}
+              <div className="flex items-center gap-2 px-5 py-2 bg-slate-50/80 dark:bg-zinc-800/30">
+                <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${color.dot}`} />
+                <span className="text-[10.5px] font-black text-slate-500 dark:text-zinc-400 uppercase tracking-[0.1em] truncate">{group.ujian.judul}</span>
+                <span className="ml-auto text-[9px] font-bold text-slate-400 dark:text-zinc-600 shrink-0">{group.soalList.length} soal</span>
+              </div>
+              {/* Soal items */}
+              {group.soalList.map((soal) => (
+                <SoalItem key={soal.id} soal={soal} onView={onView} onDelete={onDelete} />
+              ))}
+              {/* Divider between ujian groups */}
+              {gi < ujianGroups.length - 1 && (
+                <div className="h-px bg-slate-100 dark:bg-zinc-800/60 mx-4" />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ════════════════════════════════════════════════════════════
 export function KelolaSoalClient({ data }: Props) {
@@ -789,6 +906,17 @@ export function KelolaSoalClient({ data }: Props) {
   const totalPG = soalList.filter((s) => s.tipe === "PILIHAN_GANDA").length
   const totalEssay = soalList.filter((s) => s.tipe === "ESSAY").length
   const isFiltered = filterUjian !== "all" || filterTipe !== "all"
+
+  // Group filtered soal by mapel (for accordion view)
+  const groupedByMapel = useMemo(() => {
+    const map = new Map<string, Soal[]>()
+    for (const soal of filtered) {
+      const key = soal.ujian.mapel
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push(soal)
+    }
+    return Array.from(map.entries()).map(([mapel, soalList]) => ({ mapel, soalList }))
+  }, [filtered])
 
   const handleDelete = async () => {
     if (!deleteSoal) return
@@ -970,11 +1098,13 @@ export function KelolaSoalClient({ data }: Props) {
             )}
           </div>
         ) : (
-          <div>
-            {filtered.map((soal) => (
-              <SoalItem
-                key={soal.id}
-                soal={soal}
+          <div className="p-3 space-y-2">
+            {groupedByMapel.map((group, i) => (
+              <MapelGroup
+                key={group.mapel}
+                mapel={group.mapel}
+                soalList={group.soalList}
+                defaultOpen={i === 0}
                 onView={(s) => setDetailSoal(s)}
                 onDelete={(s) => { setDeleteError(null); setDeleteSoal(s) }}
               />

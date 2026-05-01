@@ -1,7 +1,5 @@
 "use client"
 
-// app/(admin)/admin/soal/buat/BuatSoalClient.tsx
-
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
@@ -39,8 +37,11 @@ import {
   ClipboardList,
   Layers,
   Star,
+  Upload,
 } from "lucide-react"
+import { ImportSoalModal } from "../components/ImportSoalModal"
 
+// ─── Interface definitions (MUST be before usage) ───
 interface Ujian {
   id: string
   judul: string
@@ -162,6 +163,7 @@ function SectionCard({
 export function BuatSoalClient({ ujianList }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
+  const [importModalOpen, setImportModalOpen] = useState(false)
 
   const [form, setForm] = useState({
     ujianId: "",
@@ -299,8 +301,8 @@ export function BuatSoalClient({ ujianList }: Props) {
             </div>
           </div>
 
-          {/* Title row */}
-          <div className="flex items-start justify-between gap-4">
+          {/* Title row with Import Button */}
+          <div className="flex items-start justify-between gap-4 flex-wrap">
             <div className="flex items-center gap-3.5">
               <div
                 className="flex items-center justify-center w-11 h-11 rounded-2xl shrink-0"
@@ -343,6 +345,23 @@ export function BuatSoalClient({ ujianList }: Props) {
                 </>
               )}
             </div>
+          </div>
+
+          {/* Import Button Row */}
+          <div className="mt-4 flex justify-end">
+            <ImportSoalModal
+              ujianList={ujianList}
+              onSuccess={() => router.refresh()}
+              open={importModalOpen}
+              onOpenChange={setImportModalOpen}
+            >
+              <Button
+                className="gap-2 bg-white/20 backdrop-blur-sm hover:bg-white/30 border border-white/30 text-white shadow-lg rounded-xl"
+              >
+                <Upload className="size-4" />
+                Import Soal
+              </Button>
+            </ImportSoalModal>
           </div>
         </div>
       </div>

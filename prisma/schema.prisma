@@ -33,6 +33,7 @@ model Ujian {
   waktuMulai   DateTime
   waktuSelesai DateTime
   durasi       Int
+  createdAt    DateTime    @default(now()) // ✅ FIX: Tambahkan createdAt
   soal         Soal[]
   hasil        HasilUjian[]
 }

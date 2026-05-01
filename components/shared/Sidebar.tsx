@@ -146,31 +146,25 @@ export function Sidebar() {
         {/* Logo */}
         <div
           className="sidebar-logo-area shrink-0 flex flex-col items-center justify-center gap-2 border-b border-border/40"
-          style={{ height: "110px", paddingTop: "18px", paddingBottom: "14px" }}
+          style={{ height: "120px", paddingTop: "18px", paddingBottom: "14px" }}
         >
           <div
-            className="relative flex items-center justify-center rounded-2xl bg-white shadow-md border border-border/30"
-            style={{ width: "56px", height: "56px", padding: "6px" }}
+            className="relative flex items-center justify-center"
+            style={{ width: "72px", height: "72px" }}
           >
-            <div style={{ position: "relative", width: "44px", height: "44px" }}>
-              <Image
-                src="/logo.png"
-                alt="Logo SMA Al-Istiqomah"
-                fill
-                style={{ objectFit: "contain" }}
-                priority
-              />
-            </div>
-            <span
-              className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full bg-primary border-2 border-background"
-              style={{ boxShadow: "0 0 0 1px hsl(var(--primary)/0.3)" }}
+            <Image
+              src="/logo.png"
+              alt="Logo SMA Al-Istiqomah"
+              fill
+              style={{ objectFit: "contain" }}
+              priority
             />
           </div>
           <div className="text-center leading-none">
-            <p className="font-bold text-foreground" style={{ fontSize: "10px", letterSpacing: "0.04em" }}>
+            <p className="font-bold text-foreground" style={{ fontSize: "11px", letterSpacing: "0.04em" }}>
               SMA Al-Istiqomah
             </p>
-            <p className="text-muted-foreground mt-0.5" style={{ fontSize: "8.5px", letterSpacing: "0.06em" }}>
+            <p className="text-muted-foreground mt-0.5" style={{ fontSize: "9px", letterSpacing: "0.06em" }}>
               SISTEM UJIAN ONLINE
             </p>
           </div>
