@@ -1,6 +1,14 @@
-// app/api/soal/import-file/route.ts
-// Endpoint khusus untuk import file Word (.docx) yang perlu diparse dengan mammoth di server
-// Untuk Excel/CSV, parsing dilakukan di client (ImportSoalModal) lalu dikirim ke /api/soal/import sebagai JSON
+// LOKASI FILE INI: app/api/soal/import-file/route.ts
+// ⚠️  Pastikan folder "import-file" sudah dibuat di dalam app/api/soal/
+// Struktur yang benar:
+//   app/
+//   └── api/
+//       └── soal/
+//           ├── route.ts              ← GET & POST soal biasa
+//           ├── import/
+//           │   └── route.ts          ← POST import dari Excel/CSV (JSON)
+//           └── import-file/          ← ✅ FOLDER INI YANG HARUS DIBUAT
+//               └── route.ts          ← ✅ FILE INI
 
 import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
@@ -50,6 +58,7 @@ async function parseWordFile(buffer: Buffer): Promise<SoalImportRow[]> {
     }
   }
 
+  // Proses soal terakhir
   if (currentText && currentNomor) {
     const parsed = parseSoalText(currentText, currentNomor)
     if (parsed) soalList.push(parsed)
@@ -65,7 +74,7 @@ function parseSoalText(text: string, nomor: number): SoalImportRow | null {
   const optionPattern = /([A-E])\.\s+([^A-E\.][^\n]*?)(?=\s+[A-E]\.\s|\s+Kunci:|\s*$)/gi
   let match
   while ((match = optionPattern.exec(text)) !== null) {
-    opsi[match[1]] = match[2].trim()
+    opsi[match[1].toUpperCase()] = match[2].trim()
     remainingText = remainingText.replace(match[0], "")
   }
 
@@ -94,16 +103,18 @@ function parseSoalText(text: string, nomor: number): SoalImportRow | null {
     nomor,
     pertanyaan,
     tipe,
-    opsiA: opsi.A || null,
-    opsiB: opsi.B || null,
-    opsiC: opsi.C || null,
-    opsiD: opsi.D || null,
-    opsiE: opsi.E || null,
-    kunciJawaban: tipe === "PILIHAN_GANDA" ? kunciJawaban : (kunciJawaban || null),
+    opsiA: opsi["A"] || null,
+    opsiB: opsi["B"] || null,
+    opsiC: opsi["C"] || null,
+    opsiD: opsi["D"] || null,
+    opsiE: opsi["E"] || null,
+    kunciJawaban: kunciJawaban || null,
     bobot: 1,
   }
 }
 
+// ✅ Next.js App Router HANYA mengenali named export: GET, POST, PUT, PATCH, DELETE
+// Inilah alasan 405 terjadi — jika file tidak ada atau export salah, Next.js return 405
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -116,12 +127,18 @@ export async function POST(request: NextRequest) {
     const file = formData.get("file") as File | null
 
     if (!ujianId || !file) {
-      return NextResponse.json({ error: "ujianId dan file wajib diisi" }, { status: 400 })
+      return NextResponse.json(
+        { error: "ujianId dan file wajib diisi" },
+        { status: 400 }
+      )
     }
 
     const ext = file.name.split(".").pop()?.toLowerCase()
     if (ext !== "docx") {
-      return NextResponse.json({ error: "Endpoint ini hanya untuk file .docx" }, { status: 400 })
+      return NextResponse.json(
+        { error: "Endpoint ini hanya untuk file .docx" },
+        { status: 400 }
+      )
     }
 
     const ujian = await prisma.ujian.findUnique({ where: { id: ujianId } })
@@ -135,18 +152,26 @@ export async function POST(request: NextRequest) {
 
     if (soalList.length === 0) {
       return NextResponse.json(
-        { error: "Tidak ada soal yang ditemukan dalam file Word" },
+        {
+          error:
+            "Tidak ada soal yang ditemukan dalam file Word. " +
+            "Pastikan format sudah benar: '1. Pertanyaan A. Opsi Kunci: A'",
+        },
         { status: 400 }
       )
     }
 
     if (soalList.length > 200) {
-      return NextResponse.json({ error: "Maksimal 200 soal per import" }, { status: 400 })
+      return NextResponse.json(
+        { error: "Maksimal 200 soal per import" },
+        { status: 400 }
+      )
     }
 
     const lastSoal = await prisma.soal.findFirst({
       where: { ujianId },
       orderBy: { nomor: "desc" },
+      select: { nomor: true },
     })
     let nextNomor = (lastSoal?.nomor ?? 0) + 1
 

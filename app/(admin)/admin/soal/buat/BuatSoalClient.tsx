@@ -427,7 +427,8 @@ export function BuatSoalClient({ ujianList }: Props) {
               <SelectContent
                 position="popper"
                 sideOffset={6}
-                className="rounded-2xl border-slate-200 shadow-2xl z-50 w-[--radix-select-trigger-width] overflow-hidden p-1"
+                className="rounded-2xl border border-slate-200 shadow-[0_8px_40px_rgba(0,0,0,0.14)] z-[200] w-[--radix-select-trigger-width] overflow-hidden p-1.5"
+                style={{ backgroundColor: "#ffffff", backdropFilter: "none" }}
               >
                 {ujianList.length === 0 ? (
                   <div className="p-6 text-center">
@@ -439,14 +440,18 @@ export function BuatSoalClient({ ujianList }: Props) {
                   </div>
                 ) : (
                   ujianList.map((u) => (
-                    <SelectItem key={u.id} value={u.id} className="rounded-xl my-0.5 cursor-pointer">
-                      <div className="flex items-center gap-3 py-0.5">
-                        <div className="h-8 w-8 rounded-xl bg-teal-50 flex items-center justify-center shrink-0">
+                    <SelectItem
+                      key={u.id}
+                      value={u.id}
+                      className="rounded-xl my-0.5 cursor-pointer focus:bg-teal-50 data-[state=checked]:bg-teal-50 hover:bg-slate-50 transition-colors"
+                    >
+                      <div className="flex items-center gap-3 py-1">
+                        <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-teal-100 to-teal-50 border border-teal-100 flex items-center justify-center shrink-0 shadow-sm">
                           <BookOpen className="size-4 text-teal-600" />
                         </div>
-                        <div>
-                          <p className="font-semibold text-slate-800 text-sm">{u.judul}</p>
-                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-teal-100 text-teal-700">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-slate-800 text-sm leading-tight truncate">{u.judul}</p>
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-100 text-teal-700 mt-0.5">
                             {u.mapel}
                           </span>
                         </div>
@@ -485,21 +490,38 @@ export function BuatSoalClient({ ujianList }: Props) {
                 <SelectTrigger className="h-11 text-sm border-slate-200 bg-slate-50 hover:bg-white hover:border-indigo-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all rounded-xl font-medium">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent position="popper" sideOffset={6} className="rounded-2xl border-slate-200 shadow-2xl z-50 p-1">
-                  <SelectItem value="PILIHAN_GANDA" className="rounded-xl my-0.5 cursor-pointer">
-                    <div className="flex items-center gap-2.5 py-0.5">
-                      <div className="h-7 w-7 rounded-lg bg-blue-100 flex items-center justify-center shrink-0">
-                        <CheckSquare className="size-3.5 text-blue-600" />
+                <SelectContent
+                  position="popper"
+                  sideOffset={6}
+                  className="rounded-2xl border border-slate-200 shadow-[0_8px_40px_rgba(0,0,0,0.14)] z-[200] overflow-hidden p-1.5"
+                  style={{ backgroundColor: "#ffffff", backdropFilter: "none" }}
+                >
+                  <SelectItem
+                    value="PILIHAN_GANDA"
+                    className="rounded-xl my-0.5 cursor-pointer focus:bg-blue-50 data-[state=checked]:bg-blue-50 hover:bg-slate-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-3 py-1">
+                      <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-blue-100 to-blue-50 border border-blue-100 flex items-center justify-center shrink-0 shadow-sm">
+                        <CheckSquare className="size-4 text-blue-600" />
                       </div>
-                      <span className="font-semibold text-slate-800">Pilihan Ganda</span>
+                      <div>
+                        <p className="font-semibold text-slate-800 text-sm leading-tight">Pilihan Ganda</p>
+                        <p className="text-[10px] text-slate-400">A / B / C / D / E</p>
+                      </div>
                     </div>
                   </SelectItem>
-                  <SelectItem value="ESSAY" className="rounded-xl my-0.5 cursor-pointer">
-                    <div className="flex items-center gap-2.5 py-0.5">
-                      <div className="h-7 w-7 rounded-lg bg-violet-100 flex items-center justify-center shrink-0">
-                        <PenLine className="size-3.5 text-violet-600" />
+                  <SelectItem
+                    value="ESSAY"
+                    className="rounded-xl my-0.5 cursor-pointer focus:bg-violet-50 data-[state=checked]:bg-violet-50 hover:bg-slate-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-3 py-1">
+                      <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-violet-100 to-violet-50 border border-violet-100 flex items-center justify-center shrink-0 shadow-sm">
+                        <PenLine className="size-4 text-violet-600" />
                       </div>
-                      <span className="font-semibold text-slate-800">Essay</span>
+                      <div>
+                        <p className="font-semibold text-slate-800 text-sm leading-tight">Essay</p>
+                        <p className="text-[10px] text-slate-400">Jawaban uraian terbuka</p>
+                      </div>
                     </div>
                   </SelectItem>
                 </SelectContent>
