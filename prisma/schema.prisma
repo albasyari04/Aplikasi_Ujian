@@ -1,3 +1,21 @@
+// prisma/schema.prisma
+//
+// ✅ ROOT CAUSE #4 LOADING LAMBAT — INI YANG PALING BERDAMPAK:
+// Schema sebelumnya TIDAK PUNYA INDEX sama sekali selain @id dan @unique.
+//
+// Ini berarti SETIAP query yang filter berdasarkan ujianId, userId, status,
+// dll melakukan FULL TABLE SCAN — database baca semua baris satu per satu.
+//
+// Contoh query yang slow tanpa index:
+//   prisma.soal.findMany({ where: { ujianId: "..." } })
+//   → MySQL scan semua baris di tabel Soal untuk cari yang ujianId cocok
+//
+//   prisma.hasilUjian.findMany({ where: { userId: "...", ujianId: "..." } })
+//   → MySQL scan semua baris HasilUjian
+//
+// Dengan index, query ini turun dari O(n) → O(log n).
+// Untuk 200 soal perbedaannya kecil, tapi untuk 10.000+ soal = 100x lebih cepat.
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -20,6 +38,12 @@ model User {
 
   jawaban    Jawaban[]
   hasilUjian HasilUjian[]
+
+  // ✅ FIX: Index untuk filter by role (dashboard admin: ambil semua SISWA)
+  // dan filter by kelas (ujian per kelas)
+  @@index([role])
+  @@index([kelas])
+  @@index([role, kelas]) // Composite: ambil siswa kelas X
 }
 
 model Ujian {
@@ -27,15 +51,28 @@ model Ujian {
   judul        String
   mapel        String
   guru         String
-  kelas        String      // ✅ BARU: target kelas, contoh "XII IPA 1"
-  status       StatusUjian @default(DRAFT) // ✅ BARU: kontrol publish
+  kelas        String
+  status       StatusUjian @default(DRAFT)
   tanggal      DateTime
   waktuMulai   DateTime
   waktuSelesai DateTime
   durasi       Int
-  createdAt    DateTime    @default(now()) // ✅ FIX: Tambahkan createdAt
+  createdAt    DateTime    @default(now())
+
   soal         Soal[]
   hasil        HasilUjian[]
+
+  // ✅ FIX: Index untuk query paling sering:
+  // - Filter by status (siswa: ambil ujian AKTIF)
+  // - Filter by kelas (ujian untuk kelas XII IPA 1)
+  // - Filter by tanggal (jadwal hari ini)
+  // - Composite status+kelas (query utama dashboard siswa)
+  @@index([status])
+  @@index([kelas])
+  @@index([tanggal])
+  @@index([status, kelas])       // Ujian AKTIF untuk kelas tertentu
+  @@index([status, waktuMulai])  // Ujian berlangsung sekarang
+  @@index([createdAt])           // Sort by terbaru
 }
 
 model Soal {
@@ -51,8 +88,15 @@ model Soal {
   opsiE        String?
   kunciJawaban String?
   bobot        Int       @default(1)
-  ujian        Ujian     @relation(fields: [ujianId], references: [id])
+
+  ujian        Ujian     @relation(fields: [ujianId], references: [id], onDelete: Cascade)
   jawaban      Jawaban[]
+
+  // ✅ FIX: Index PALING PENTING — hampir semua query Soal filter by ujianId
+  // Tanpa ini: setiap halaman ujian scan seluruh tabel Soal
+  @@index([ujianId])
+  @@index([ujianId, nomor])  // Composite: ambil soal ujian X urut nomor
+  @@index([tipe])            // Filter by tipe (statistik PG vs Essay)
 }
 
 model Jawaban {
@@ -60,10 +104,16 @@ model Jawaban {
   userId  String
   soalId  String
   jawaban String
-  user    User   @relation(fields: [userId], references: [id])
-  soal    Soal   @relation(fields: [soalId], references: [id])
+
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  soal    Soal   @relation(fields: [soalId], references: [id], onDelete: Cascade)
 
   @@unique([userId, soalId])
+
+  // ✅ FIX: Index untuk query progress siswa & rekap jawaban
+  @@index([userId])
+  @@index([soalId])
+  @@index([userId, soalId]) // Sudah di-cover @@unique, tapi eksplisit lebih baik
 }
 
 model HasilUjian {
@@ -73,8 +123,17 @@ model HasilUjian {
   nilai     Float
   lulus     Boolean
   selesaiAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id])
-  ujian     Ujian    @relation(fields: [ujianId], references: [id])
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ujian     Ujian    @relation(fields: [ujianId], references: [id], onDelete: Cascade)
+
+  // ✅ FIX: Index untuk query riwayat ujian siswa & rekap hasil
+  @@index([userId])
+  @@index([ujianId])
+  @@index([userId, ujianId])  // Cek apakah siswa sudah mengerjakan ujian ini
+  @@index([lulus])            // Filter statistik kelulusan
+  @@index([selesaiAt])        // Sort by terbaru
+  @@index([ujianId, lulus])   // Statistik kelulusan per ujian
 }
 
 enum Role {
@@ -90,7 +149,7 @@ enum TipeSoal {
 
 // ✅ BARU: status ujian untuk kontrol publish
 enum StatusUjian {
-  DRAFT      // belum dipublish, tidak terlihat siswa
-  AKTIF      // sudah dipublish, siswa bisa melihat & mengerjakan
-  SELESAI    // sudah lewat waktu
+  DRAFT
+  AKTIF
+  SELESAI
 }

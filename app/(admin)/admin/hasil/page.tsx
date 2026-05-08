@@ -5,26 +5,36 @@ import { prisma } from "@/lib/prisma"
 import { redirect } from "next/navigation"
 import { AdminHasilClient } from "./AdminHasilClient"
 
+// ✅ FIX: Cache hasil untuk 60 detik
+export const revalidate = 60
+
 async function getHasilData() {
+  // ✅ FIX: Batasi hasil ke 1000 terakhir untuk performance
+  // Jika lebih banyak, gunakan pagination di component client
   const [hasilUjian, semuaUjian, semuaSiswa] = await Promise.all([
-    // Semua hasil ujian dengan relasi lengkap
+    // Semua hasil ujian dengan relasi lengkap - LIMIT 1000
     prisma.hasilUjian.findMany({
-      include: {
+      select: {
+        id: true,
+        nilai: true,
+        lulus: true,
+        selesaiAt: true,
+        userId: true,
+        ujianId: true,
         user: {
           select: { id: true, nama: true, kelas: true, email: true },
         },
         ujian: {
-          // ✅ nilaiKKM dihapus — sesuaikan jika ada di schema kamu
           select: { id: true, judul: true, mapel: true },
         },
       },
       orderBy: { selesaiAt: "desc" },
+      take: 1000, // ✅ Limit untuk prevent loading ribuan records
     }),
 
     // Daftar ujian untuk filter dropdown
     prisma.ujian.findMany({
       select: { id: true, judul: true, mapel: true },
-      // ✅ createdAt diganti waktuMulai yang ada di model Ujian
       orderBy: { waktuMulai: "desc" },
     }),
 
@@ -36,18 +46,18 @@ async function getHasilData() {
     }),
   ])
 
-  // Statistik agregat
+  // Statistik agregat - hanya dari 1000 hasil yang diambil
   const totalHasil = hasilUjian.length
   const rataRataNilai =
     totalHasil > 0
-      ? Math.round(hasilUjian.reduce((s, h) => s + h.nilai, 0) / totalHasil)
+      ? Math.round(hasilUjian.reduce((s: any, h: any) => s + h.nilai, 0) / totalHasil)
       : 0
-  const totalLulus = hasilUjian.filter((h) => h.lulus).length
+  const totalLulus = hasilUjian.filter((h: any) => h.lulus).length
   const tingkatKelulusan =
     totalHasil > 0 ? Math.round((totalLulus / totalHasil) * 100) : 0
 
   // Nilai tertinggi & terendah
-  const nilaiList = hasilUjian.map((h) => h.nilai)
+  const nilaiList = hasilUjian.map((h: any) => h.nilai)
   const nilaiTertinggi = nilaiList.length > 0 ? Math.max(...nilaiList) : 0
   const nilaiTerendah = nilaiList.length > 0 ? Math.min(...nilaiList) : 0
 

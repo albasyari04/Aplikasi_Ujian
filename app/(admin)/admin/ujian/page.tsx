@@ -5,6 +5,9 @@ import { prisma } from "@/lib/prisma"
 import { redirect } from "next/navigation"
 import { KelolaUjianClient } from "./KelolaUjianClient"
 
+// ✅ FIX: Cache ujian list untuk 60 detik
+export const revalidate = 60
+
 async function getUjianList() {
   return prisma.ujian.findMany({
     select: {

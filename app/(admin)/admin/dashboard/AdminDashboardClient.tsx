@@ -589,7 +589,17 @@ export function AdminDashboardClient({ data, user }: Props) {
                 </div>
                 <div className="px-4 py-3" style={{ borderTop: "1px solid var(--border)" }}>
                   {ujianAktif.map((u) => (
-                    <InfoUjianCard key={u.id} ujian={toUjianProps(u)} showAction={false} />
+                    <InfoUjianCard 
+                      key={u.id} 
+                      id={u.id}
+                      mataPelajaran={u.mapel}
+                      kelas={"Admin"}
+                      guru={u.guru}
+                      waktu={formatWaktu(u.waktuMulai)}
+                      jumlahSoal={u.soal?.length ?? 0}
+                      deadline={formatTanggal(u.waktuSelesai)}
+                      status="aktif"
+                    />
                   ))}
                 </div>
               </CardShell>
@@ -625,14 +635,10 @@ export function AdminDashboardClient({ data, user }: Props) {
                     {ujianMendatang.map((u) => (
                       <JadwalMiniCard
                         key={u.id}
-                        jadwal={{
-                          id: u.id,
-                          judul: u.judul,
-                          mapel: u.mapel,
-                          tanggal: toIso(u.tanggal),
-                          waktuMulai: toIso(u.waktuMulai),
-                        }}
-                        compact
+                        jam={formatWaktu(u.waktuMulai)}
+                        mataPelajaran={u.mapel}
+                        ruang={u.judul}
+                        type="ujian"
                       />
                     ))}
                   </div>

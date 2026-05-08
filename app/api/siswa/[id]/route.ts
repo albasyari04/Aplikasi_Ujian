@@ -14,7 +14,7 @@ async function guardAdmin() {
 // PATCH /api/siswa/[id] — edit siswa
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await guardAdmin()
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -30,8 +30,9 @@ export async function PATCH(
     if (kelas !== undefined) updateData.kelas = kelas
     if (password) updateData.password = await bcryptjs.hash(password, 10)
 
+    const { id } = await params
     const siswa = await prisma.user.update({
-      where: { id: params.id },
+      where: { id },
       data: updateData,
       select: { id: true, nama: true, email: true, nis: true, kelas: true, createdAt: true },
     })
@@ -46,13 +47,14 @@ export async function PATCH(
 // DELETE /api/siswa/[id] — hapus siswa
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await guardAdmin()
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   try {
-    await prisma.user.delete({ where: { id: params.id } })
+    const { id } = await params
+    await prisma.user.delete({ where: { id } })
     return NextResponse.json({ success: true })
   } catch (err) {
     console.error(err)

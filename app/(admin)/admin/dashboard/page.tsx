@@ -5,6 +5,11 @@ import { prisma } from "@/lib/prisma"
 import { redirect } from "next/navigation"
 import { AdminDashboardClient } from "./AdminDashboardClient"
 
+// ✅ FIX: Cache dashboard untuk 60 detik
+// User akan lihat data yang sedikit lama, tapi navigasi jadi sangat cepat
+// Setiap kunjungan setelah 60s akan di-revalidate di background
+export const revalidate = 60
+
 async function getDashboardData() {
   const now = new Date()
   const tujuhHariKedepan = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
@@ -29,30 +34,55 @@ async function getDashboardData() {
     // Total ujian
     prisma.ujian.count(),
 
-    // Ujian sedang berlangsung
+    // ✅ FIX: Ujian sedang berlangsung - JANGAN include soal
+    // Cukup _count untuk jumlah soal, tidak perlu data soal sendiri
     prisma.ujian.findMany({
       where: {
         waktuMulai: { lte: now },
         waktuSelesai: { gte: now },
       },
-      include: { soal: true },
+      select: {
+        id: true,
+        judul: true,
+        mapel: true,
+        guru: true,
+        tanggal: true,
+        waktuMulai: true,
+        waktuSelesai: true,
+        durasi: true,
+        _count: { select: { soal: true } },
+      },
       orderBy: { waktuMulai: "asc" },
       take: 3,
     }),
 
-    // Ujian mendatang (7 hari ke depan)
+    // ✅ FIX: Ujian mendatang - JANGAN include soal
     prisma.ujian.findMany({
       where: {
         waktuMulai: { gt: now, lte: tujuhHariKedepan },
       },
-      include: { soal: true },
+      select: {
+        id: true,
+        judul: true,
+        mapel: true,
+        guru: true,
+        tanggal: true,
+        waktuMulai: true,
+        waktuSelesai: true,
+        durasi: true,
+        _count: { select: { soal: true } },
+      },
       orderBy: { waktuMulai: "asc" },
       take: 5,
     }),
 
     // Hasil ujian terbaru (semua siswa)
     prisma.hasilUjian.findMany({
-      include: {
+      select: {
+        id: true,
+        nilai: true,
+        lulus: true,
+        selesaiAt: true,
         user: { select: { nama: true, kelas: true } },
         ujian: { select: { judul: true, mapel: true } },
       },
@@ -60,12 +90,13 @@ async function getDashboardData() {
       take: 6,
     }),
 
-    // Semua hasil untuk statistik
+    // ✅ FIX: Semua hasil - ambil aggregation, tidak perlu select semua
+    // Hanya butuh nilai dan lulus untuk statistik
     prisma.hasilUjian.findMany({
       select: { nilai: true, lulus: true },
     }),
 
-    // Ujian hari ini
+    // ✅ FIX: Ujian hari ini - JANGAN include soal
     prisma.ujian.findMany({
       where: {
         tanggal: {
@@ -73,7 +104,16 @@ async function getDashboardData() {
           lt: new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1),
         },
       },
-      include: { soal: true },
+      select: {
+        id: true,
+        judul: true,
+        mapel: true,
+        guru: true,
+        waktuMulai: true,
+        waktuSelesai: true,
+        durasi: true,
+        _count: { select: { soal: true } },
+      },
       orderBy: { waktuMulai: "asc" },
     }),
   ])

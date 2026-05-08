@@ -74,8 +74,8 @@ export function Navbar() {
   const initials = user ? getInitials(user.nama ?? user.name ?? "?") : "?"
   const loading  = status === "loading"
 
-  const profileHref  = isAdmin ? "/admin/dashboard/profil" : "/profil"
-  const settingsHref = isAdmin ? "/admin/dashboard/pengaturan" : "/pengaturan"
+  const profileHref  = isAdmin ? "/admin/profil" : "/profil"
+  const settingsHref = isAdmin ? "/admin/pengaturan" : "/pengaturan"
   const notifHref    = isAdmin ? "/admin/dashboard/notifikasi" : "/notifikasi"
 
   // ── SSR / Loading skeleton ─────────────────────────────────────────────────

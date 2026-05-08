@@ -163,6 +163,8 @@ function SectionCard({
 export function BuatSoalClient({ ujianList }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
+
+  // ✅ FIX: State importModalOpen digunakan untuk controlled modal (bukan sebagai trigger children)
   const [importModalOpen, setImportModalOpen] = useState(false)
 
   const [form, setForm] = useState({
@@ -301,7 +303,7 @@ export function BuatSoalClient({ ujianList }: Props) {
             </div>
           </div>
 
-          {/* Title row with Import Button */}
+          {/* Title row */}
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div className="flex items-center gap-3.5">
               <div
@@ -347,24 +349,31 @@ export function BuatSoalClient({ ujianList }: Props) {
             </div>
           </div>
 
-          {/* Import Button Row */}
+          {/* ✅ FIX: Import Button Row — trigger terpisah dari modal */}
           <div className="mt-4 flex justify-end">
-            <ImportSoalModal
-              ujianList={ujianList}
-              onSuccess={() => router.refresh()}
-              open={importModalOpen}
-              onOpenChange={setImportModalOpen}
+            <Button
+              type="button"
+              onClick={() => setImportModalOpen(true)}
+              className="gap-2 bg-white/20 backdrop-blur-sm hover:bg-white/30 border border-white/30 text-white shadow-lg rounded-xl"
             >
-              <Button
-                className="gap-2 bg-white/20 backdrop-blur-sm hover:bg-white/30 border border-white/30 text-white shadow-lg rounded-xl"
-              >
-                <Upload className="size-4" />
-                Import Soal
-              </Button>
-            </ImportSoalModal>
+              <Upload className="size-4" />
+              Import Soal
+            </Button>
           </div>
         </div>
       </div>
+
+      {/* ✅ FIX: ImportSoalModal diletakkan di luar hero banner, controlled via isOpen/onClose */}
+      <ImportSoalModal
+        isOpen={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        ujianList={ujianList}
+        defaultUjianId={form.ujianId}
+        onSuccess={() => {
+          setImportModalOpen(false)
+          router.refresh()
+        }}
+      />
 
       {/* ════════════════════════════════════════
           ALERTS
@@ -731,7 +740,7 @@ export function BuatSoalClient({ ujianList }: Props) {
       {/* ════════════════════════════════════════
           STICKY ACTION BAR
       ════════════════════════════════════════ */}
-      <div className="fixed bottom-0 left-0 right-0 md:left-60 z-50 p-3 sm:p-4">
+      <div className={`fixed bottom-0 left-0 right-0 md:left-60 z-50 p-3 sm:p-4 transition-all duration-200 ${importModalOpen ? "invisible opacity-0 pointer-events-none" : "visible opacity-100"}`}>
         <div
           className="flex items-center justify-between gap-3 px-4 py-3 rounded-2xl border border-slate-200/80"
           style={{

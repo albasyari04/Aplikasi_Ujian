@@ -5,6 +5,9 @@ import { prisma } from "@/lib/prisma"
 import { redirect } from "next/navigation"
 import { AdminSiswaClient } from "./AdminSiswaClient"
 
+// ✅ FIX: Cache siswa list untuk 60 detik
+export const revalidate = 60
+
 async function getSiswaData() {
   const siswa = await prisma.user.findMany({
     where: { role: "SISWA" },

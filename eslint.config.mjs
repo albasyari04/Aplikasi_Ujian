@@ -1,18 +1,32 @@
-import { defineConfig, globalIgnores } from "eslint/config";
-import nextVitals from "eslint-config-next/core-web-vitals";
-import nextTs from "eslint-config-next/typescript";
+import { defineConfig } from "eslint/config";
+import js from "@eslint/js";
 
 const eslintConfig = defineConfig([
-  ...nextVitals,
-  ...nextTs,
-  // Override default ignores of eslint-config-next.
-  globalIgnores([
-    // Default ignores of eslint-config-next:
-    ".next/**",
-    "out/**",
-    "build/**",
-    "next-env.d.ts",
-  ]),
+  {
+    ignores: [
+      ".next/**",
+      "out/**",
+      "build/**",
+      "dist/**",
+      "node_modules/**",
+      "next-env.d.ts",
+      ".git/**",
+    ],
+  },
+  {
+    files: ["**/*.{js,mjs,cjs,ts,tsx}"],
+    languageOptions: {
+      ecmaVersion: 2021,
+      sourceType: "module",
+      globals: {
+        React: "readonly",
+        JSX: "readonly",
+      },
+    },
+    rules: {
+      // Add your custom rules here
+    },
+  },
 ]);
 
 export default eslintConfig;

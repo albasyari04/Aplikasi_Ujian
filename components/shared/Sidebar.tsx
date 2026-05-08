@@ -119,7 +119,24 @@ export function Sidebar() {
 
   const isActive = (href: string) => {
     if (ROOT_HREFS.includes(href)) return pathname === href
-    return pathname === href || pathname.startsWith(href + "/")
+    // Exact match takes priority
+    if (pathname === href) return true
+    // Only prefix match if no other item will have exact match
+    // This prevents "Kelola Soal" from being active when on "Buat Soal"
+    if (pathname.startsWith(href + "/")) {
+      // Check if any sibling path with same parent should be prioritized
+      // e.g., /admin/soal/buat should match /admin/soal/buat exactly, not /admin/soal as prefix
+      const pathParts = pathname.split("/").filter(Boolean)
+      const hrefParts = href.split("/").filter(Boolean)
+      // If current path has one more segment after this href, it might be a sub-route
+      if (pathParts.length > hrefParts.length) {
+        // Only match if href ends with a "master" pattern (not buat/edit/etc)
+        // For now, allow prefix match but let exact matches be more specific elsewhere
+        return !pathname.match(/\/(buat|edit|import)($|\/)/i)
+      }
+      return true
+    }
+    return false
   }
 
   const displayUser = user ?? (session?.user as any)

@@ -1,12 +1,11 @@
-// app/api/soal/import-file/route.ts
-// Endpoint khusus untuk import file Word (.docx) yang perlu diparse dengan mammoth di server
-// Untuk Excel/CSV, parsing dilakukan di client (ImportSoalModal) lalu dikirim ke /api/soal/import sebagai JSON
+// app/api/soal/import/route.ts
+// Endpoint untuk import soal dari Excel/CSV yang sudah di-parse di client
+// Data dikirim sebagai JSON array dari ImportSoalModal
 
 import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
-import mammoth from "mammoth"
 
 interface SoalImportRow {
   nomor?: number
@@ -21,89 +20,6 @@ interface SoalImportRow {
   bobot?: number
 }
 
-async function parseWordFile(buffer: Buffer): Promise<SoalImportRow[]> {
-  const result = await mammoth.extractRawText({ buffer })
-  const text = result.value
-
-  const soalList: SoalImportRow[] = []
-  const lines = text.split(/\r?\n/)
-  let currentText = ""
-  let currentNomor: number | null = null
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim()
-    if (!line) continue
-
-    const nomorMatch = line.match(/^(\d+)[\.\)]\s*(.*)/)
-    if (nomorMatch && currentNomor === null) {
-      currentNomor = parseInt(nomorMatch[1])
-      currentText = nomorMatch[2]
-    } else if (nomorMatch && currentNomor !== null) {
-      if (currentText) {
-        const parsed = parseSoalText(currentText, currentNomor)
-        if (parsed) soalList.push(parsed)
-      }
-      currentNomor = parseInt(nomorMatch[1])
-      currentText = nomorMatch[2]
-    } else {
-      currentText = currentText ? currentText + " " + line : line
-    }
-  }
-
-  if (currentText && currentNomor) {
-    const parsed = parseSoalText(currentText, currentNomor)
-    if (parsed) soalList.push(parsed)
-  }
-
-  return soalList
-}
-
-function parseSoalText(text: string, nomor: number): SoalImportRow | null {
-  const opsi: Record<string, string> = {}
-  let remainingText = text
-
-  const optionPattern = /([A-E])\.\s+([^A-E\.][^\n]*?)(?=\s+[A-E]\.\s|\s+Kunci:|\s*$)/gi
-  let match
-  while ((match = optionPattern.exec(text)) !== null) {
-    opsi[match[1]] = match[2].trim()
-    remainingText = remainingText.replace(match[0], "")
-  }
-
-  let kunciJawaban: string | null = null
-  const kunciMatch = text.match(/Kunci(?:\s+Jawaban)?:\s*([A-E])/i)
-  if (kunciMatch) {
-    kunciJawaban = kunciMatch[1].toUpperCase()
-    remainingText = remainingText.replace(kunciMatch[0], "")
-  }
-
-  let pertanyaan = remainingText
-    .replace(/^\d+[\.\)]\s*/, "")
-    .replace(/\s+/g, " ")
-    .trim()
-
-  if (!pertanyaan && text) {
-    pertanyaan = text.replace(/^\d+[\.\)]\s*/, "").replace(/\s+/g, " ").trim()
-  }
-
-  const hasOptions = Object.keys(opsi).length >= 2
-  const tipe = hasOptions ? "PILIHAN_GANDA" : "ESSAY"
-
-  if (!pertanyaan) return null
-
-  return {
-    nomor,
-    pertanyaan,
-    tipe,
-    opsiA: opsi.A || null,
-    opsiB: opsi.B || null,
-    opsiC: opsi.C || null,
-    opsiD: opsi.D || null,
-    opsiE: opsi.E || null,
-    kunciJawaban: tipe === "PILIHAN_GANDA" ? kunciJawaban : (kunciJawaban || null),
-    bobot: 1,
-  }
-}
-
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -111,17 +27,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const formData = await request.formData()
-    const ujianId = formData.get("ujianId") as string
-    const file = formData.get("file") as File | null
+    const body = await request.json()
+    const { ujianId, soalList } = body as { ujianId: string; soalList: SoalImportRow[] }
 
-    if (!ujianId || !file) {
-      return NextResponse.json({ error: "ujianId dan file wajib diisi" }, { status: 400 })
+    if (!ujianId || !Array.isArray(soalList) || soalList.length === 0) {
+      return NextResponse.json(
+        { error: "ujianId dan soalList wajib diisi" },
+        { status: 400 }
+      )
     }
 
-    const ext = file.name.split(".").pop()?.toLowerCase()
-    if (ext !== "docx") {
-      return NextResponse.json({ error: "Endpoint ini hanya untuk file .docx" }, { status: 400 })
+    if (soalList.length > 200) {
+      return NextResponse.json(
+        { error: "Maksimal 200 soal per import" },
+        { status: 400 }
+      )
     }
 
     const ujian = await prisma.ujian.findUnique({ where: { id: ujianId } })
@@ -129,24 +49,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Ujian tidak ditemukan" }, { status: 404 })
     }
 
-    const arrayBuffer = await file.arrayBuffer()
-    const buffer = Buffer.from(arrayBuffer)
-    const soalList = await parseWordFile(buffer)
-
-    if (soalList.length === 0) {
-      return NextResponse.json(
-        { error: "Tidak ada soal yang ditemukan dalam file Word" },
-        { status: 400 }
-      )
-    }
-
-    if (soalList.length > 200) {
-      return NextResponse.json({ error: "Maksimal 200 soal per import" }, { status: 400 })
-    }
-
     const lastSoal = await prisma.soal.findFirst({
       where: { ujianId },
       orderBy: { nomor: "desc" },
+      select: { nomor: true },
     })
     let nextNomor = (lastSoal?.nomor ?? 0) + 1
 
@@ -217,7 +123,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(
       {
-        message: `Berhasil mengimport ${result.count} soal dari file Word`,
+        message: `Berhasil mengimport ${result.count} soal`,
         imported: result.count,
         total: soalList.length,
         errors: errors.length > 0 ? errors : undefined,
@@ -225,7 +131,7 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     )
   } catch (error) {
-    console.error("POST /api/soal/import-file error:", error)
+    console.error("POST /api/soal/import error:", error)
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 })
   }
 }

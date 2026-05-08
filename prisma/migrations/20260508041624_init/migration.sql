@@ -11,6 +11,9 @@ CREATE TABLE `User` (
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 
     UNIQUE INDEX `User_email_key`(`email`),
+    INDEX `User_role_idx`(`role`),
+    INDEX `User_kelas_idx`(`kelas`),
+    INDEX `User_role_kelas_idx`(`role`, `kelas`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -28,6 +31,12 @@ CREATE TABLE `Ujian` (
     `durasi` INTEGER NOT NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 
+    INDEX `Ujian_status_idx`(`status`),
+    INDEX `Ujian_kelas_idx`(`kelas`),
+    INDEX `Ujian_tanggal_idx`(`tanggal`),
+    INDEX `Ujian_status_kelas_idx`(`status`, `kelas`),
+    INDEX `Ujian_status_waktuMulai_idx`(`status`, `waktuMulai`),
+    INDEX `Ujian_createdAt_idx`(`createdAt`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -46,6 +55,9 @@ CREATE TABLE `Soal` (
     `kunciJawaban` VARCHAR(191) NULL,
     `bobot` INTEGER NOT NULL DEFAULT 1,
 
+    INDEX `Soal_ujianId_idx`(`ujianId`),
+    INDEX `Soal_ujianId_nomor_idx`(`ujianId`, `nomor`),
+    INDEX `Soal_tipe_idx`(`tipe`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -56,6 +68,9 @@ CREATE TABLE `Jawaban` (
     `soalId` VARCHAR(191) NOT NULL,
     `jawaban` VARCHAR(191) NOT NULL,
 
+    INDEX `Jawaban_userId_idx`(`userId`),
+    INDEX `Jawaban_soalId_idx`(`soalId`),
+    INDEX `Jawaban_userId_soalId_idx`(`userId`, `soalId`),
     UNIQUE INDEX `Jawaban_userId_soalId_key`(`userId`, `soalId`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -69,20 +84,26 @@ CREATE TABLE `HasilUjian` (
     `lulus` BOOLEAN NOT NULL,
     `selesaiAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 
+    INDEX `HasilUjian_userId_idx`(`userId`),
+    INDEX `HasilUjian_ujianId_idx`(`ujianId`),
+    INDEX `HasilUjian_userId_ujianId_idx`(`userId`, `ujianId`),
+    INDEX `HasilUjian_lulus_idx`(`lulus`),
+    INDEX `HasilUjian_selesaiAt_idx`(`selesaiAt`),
+    INDEX `HasilUjian_ujianId_lulus_idx`(`ujianId`, `lulus`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- AddForeignKey
-ALTER TABLE `Soal` ADD CONSTRAINT `Soal_ujianId_fkey` FOREIGN KEY (`ujianId`) REFERENCES `Ujian`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE `Soal` ADD CONSTRAINT `Soal_ujianId_fkey` FOREIGN KEY (`ujianId`) REFERENCES `Ujian`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE `Jawaban` ADD CONSTRAINT `Jawaban_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE `Jawaban` ADD CONSTRAINT `Jawaban_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE `Jawaban` ADD CONSTRAINT `Jawaban_soalId_fkey` FOREIGN KEY (`soalId`) REFERENCES `Soal`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE `Jawaban` ADD CONSTRAINT `Jawaban_soalId_fkey` FOREIGN KEY (`soalId`) REFERENCES `Soal`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE `HasilUjian` ADD CONSTRAINT `HasilUjian_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE `HasilUjian` ADD CONSTRAINT `HasilUjian_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE `HasilUjian` ADD CONSTRAINT `HasilUjian_ujianId_fkey` FOREIGN KEY (`ujianId`) REFERENCES `Ujian`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE `HasilUjian` ADD CONSTRAINT `HasilUjian_ujianId_fkey` FOREIGN KEY (`ujianId`) REFERENCES `Ujian`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;

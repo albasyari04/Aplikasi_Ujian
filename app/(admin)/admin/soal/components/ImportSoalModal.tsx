@@ -1,797 +1,932 @@
 "use client"
 
-import { useState, useCallback, useRef, useEffect } from "react"
-import * as DialogPrimitive from "@radix-ui/react-dialog"
-import { Button } from "@/components/ui/button"
+import React, { useRef, useState, useCallback } from "react"
 import {
+  X,
   Upload,
   FileSpreadsheet,
   FileText,
-  File,
-  X,
+  Download,
   CheckCircle2,
   AlertCircle,
   Loader2,
-  Download,
-  Database,
   BookOpen,
+  Layers,
+  Hash,
+  Star,
   ChevronDown,
-  Search,
+  File,
+  ChevronRight,
+  Sparkles,
+  TableIcon,
 } from "lucide-react"
-import { cn } from "@/lib/utils"
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-interface Ujian {
+interface UjianOption {
   id: string
   judul: string
   mapel: string
 }
 
 interface ImportSoalModalProps {
-  ujianList: Ujian[]
+  isOpen: boolean
+  onClose: () => void
+  ujianList: UjianOption[]
+  defaultUjianId?: string
   onSuccess?: () => void
-  children?: React.ReactNode
-  open?: boolean
-  onOpenChange?: (open: boolean) => void
 }
 
-// ─── Mapel color map ──────────────────────────────────────────────────────────
-const MAPEL_COLORS: Record<string, { bg: string; text: string; badgeBg: string; badgeText: string }> = {
-  default:    { bg: "#ccfbf1", text: "#0f766e", badgeBg: "#ccfbf1", badgeText: "#0f766e" },
-  Matematika: { bg: "#dbeafe", text: "#1d4ed8", badgeBg: "#dbeafe", badgeText: "#1d4ed8" },
-  Kimia:      { bg: "#ede9fe", text: "#7c3aed", badgeBg: "#ede9fe", badgeText: "#7c3aed" },
-  Fisika:     { bg: "#ffedd5", text: "#c2410c", badgeBg: "#ffedd5", badgeText: "#c2410c" },
-  Biologi:    { bg: "#d1fae5", text: "#065f46", badgeBg: "#d1fae5", badgeText: "#065f46" },
-  "B. Indonesia": { bg: "#fce7f3", text: "#be185d", badgeBg: "#fce7f3", badgeText: "#be185d" },
-  "B. Inggris":   { bg: "#e0f2fe", text: "#0369a1", badgeBg: "#e0f2fe", badgeText: "#0369a1" },
+type FileType = "excel" | "csv" | "docx" | null
+type TipeSoal = "PILIHAN_GANDA" | "ESSAY"
+
+interface ParsedSoal {
+  nomor?: number
+  pertanyaan: string
+  tipe: TipeSoal
+  opsiA?: string | null
+  opsiB?: string | null
+  opsiC?: string | null
+  opsiD?: string | null
+  opsiE?: string | null
+  kunciJawaban?: string | null
+  bobot?: number
 }
 
-function getMapelStyle(mapel: string) {
-  return MAPEL_COLORS[mapel] ?? MAPEL_COLORS.default
+// ─── XLSX / CSV parser (client-side) ───────────────────────────────────────
+async function parseExcelFile(file: File): Promise<ParsedSoal[]> {
+  const XLSX = await import("xlsx")
+  const ab = await file.arrayBuffer()
+  const wb = XLSX.read(ab, { type: "array" })
+  const ws = wb.Sheets[wb.SheetNames[0]]
+  const rows: Record<string, string>[] = XLSX.utils.sheet_to_json(ws, { defval: "" })
+  return mapRows(rows)
 }
 
-// ─── Custom Ujian Dropdown ────────────────────────────────────────────────────
-function UjianDropdown({
-  ujianList,
-  value,
-  onChange,
-}: {
-  ujianList: Ujian[]
-  value: string
-  onChange: (id: string) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [search, setSearch] = useState("")
-  const containerRef = useRef<HTMLDivElement>(null)
-  const searchRef = useRef<HTMLInputElement>(null)
+async function parseCsvFile(file: File): Promise<ParsedSoal[]> {
+  const text = await file.text()
+  const lines = text.split(/\r?\n/).filter(Boolean)
+  if (lines.length < 2) return []
+  const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, ""))
+  const rows = lines.slice(1).map((line) => {
+    const values = line.split(",").map((v) => v.trim().replace(/^"|"$/g, ""))
+    return Object.fromEntries(headers.map((h, i) => [h, values[i] ?? ""]))
+  })
+  return mapRows(rows)
+}
 
-  const selected = ujianList.find((u) => u.id === value)
-  const filtered = ujianList.filter(
-    (u) =>
-      u.judul.toLowerCase().includes(search.toLowerCase()) ||
-      u.mapel.toLowerCase().includes(search.toLowerCase())
-  )
+function mapRows(rows: Record<string, string>[]): ParsedSoal[] {
+  return rows
+    .filter((r) => r.pertanyaan?.trim())
+    .map((r, i) => {
+      const hasOptions = r.opsiA?.trim() && r.opsiB?.trim()
+      const tipe: TipeSoal = hasOptions ? "PILIHAN_GANDA" : "ESSAY"
+      return {
+        nomor: r.nomor ? parseInt(r.nomor) : i + 1,
+        pertanyaan: r.pertanyaan?.trim() ?? "",
+        tipe,
+        opsiA: r.opsiA?.trim() || null,
+        opsiB: r.opsiB?.trim() || null,
+        opsiC: r.opsiC?.trim() || null,
+        opsiD: r.opsiD?.trim() || null,
+        opsiE: r.opsiE?.trim() || null,
+        kunciJawaban: r.kunciJawaban?.trim().toUpperCase() || null,
+        bobot: r.bobot ? parseFloat(r.bobot) : 1,
+      }
+    })
+}
 
-  const handleOpen = () => {
-    setOpen(true)
-    setTimeout(() => searchRef.current?.focus(), 50)
-  }
+// ─── Download template ──────────────────────────────────────────────────────
+async function downloadTemplate() {
+  const XLSX = await import("xlsx")
+  const headers = ["nomor", "pertanyaan", "tipe", "opsiA", "opsiB", "opsiC", "opsiD", "opsiE", "kunciJawaban", "bobot"]
+  const sample = [
+    [1, "Ibu kota Indonesia adalah?", "PILIHAN_GANDA", "Jakarta", "Surabaya", "Bandung", "Medan", "", "A", 1],
+    [2, "Jelaskan proses fotosintesis!", "ESSAY", "", "", "", "", "", "", 5],
+  ]
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...sample])
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, "Soal")
+  XLSX.writeFile(wb, "template-soal.xlsx")
+}
 
-  const handleSelect = (id: string) => {
-    onChange(id)
-    setOpen(false)
-    setSearch("")
-  }
-
-  // ✅ PERBAIKAN: Pindahkan event listener ke dalam useEffect
-  // agar tidak menambahkan listener berulang kali setiap render
-  const handleMouseDownOutside = useCallback((e: MouseEvent) => {
-    if (!containerRef.current?.contains(e.target as Node)) {
-      setOpen(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (open) {
-      document.addEventListener("mousedown", handleMouseDownOutside)
-    }
-    return () => {
-      document.removeEventListener("mousedown", handleMouseDownOutside)
-    }
-  }, [open, handleMouseDownOutside])
-
+// ═══════════════════════════════════════════════════════════════════
+//  STEP INDICATOR
+// ═══════════════════════════════════════════════════════════════════
+function StepIndicator({ current }: { current: "upload" | "preview" }) {
+  const steps = [
+    { key: "upload", label: "Upload File", num: 1 },
+    { key: "preview", label: "Pratinjau & Konfirmasi", num: 2 },
+  ]
   return (
-    <div ref={containerRef} className="relative">
-      {/* Trigger Button */}
-      <button
-        type="button"
-        onClick={open ? () => setOpen(false) : handleOpen}
-        className="w-full h-11 flex items-center gap-3 px-3.5 rounded-xl border text-sm font-medium transition-all duration-200 text-left"
-        style={{
-          backgroundColor: "#ffffff",
-          borderColor: open ? "#14b8a6" : "#e2e8f0",
-          boxShadow: open ? "0 0 0 3px rgba(20,184,166,0.12)" : "none",
-        }}
-      >
-        {selected ? (
-          <>
-            <div
-              className="h-7 w-7 rounded-lg flex items-center justify-center shrink-0 text-[10px] font-extrabold"
-              style={{ backgroundColor: getMapelStyle(selected.mapel).bg, color: getMapelStyle(selected.mapel).text }}
-            >
-              {selected.mapel.substring(0, 2).toUpperCase()}
-            </div>
-            <span className="flex-1 font-semibold text-slate-800 truncate">{selected.judul}</span>
-            <span
-              className="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0"
-              style={{
-                backgroundColor: getMapelStyle(selected.mapel).badgeBg,
-                color: getMapelStyle(selected.mapel).badgeText,
-              }}
-            >
-              {selected.mapel}
-            </span>
-          </>
-        ) : (
-          <>
-            <BookOpen className="size-4 text-slate-400 shrink-0" />
-            <span className="flex-1 text-slate-400">Pilih ujian yang akan diisi soal...</span>
-          </>
-        )}
-        <ChevronDown
-          className="size-4 text-slate-400 shrink-0 transition-transform duration-200"
-          style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)" }}
-        />
-      </button>
-
-      {/* Dropdown Panel */}
-      {open && (
-        <div
-          className="absolute left-0 right-0 top-[calc(100%+6px)] rounded-2xl overflow-hidden"
-          style={{
-            backgroundColor: "#ffffff",
-            border: "1px solid #e2e8f0",
-            boxShadow: "0 20px 60px rgba(0,0,0,0.18), 0 4px 16px rgba(0,0,0,0.08)",
-            zIndex: 99999,
-          }}
-        >
-          {/* Search */}
-          <div className="p-2" style={{ borderBottom: "1px solid #f1f5f9" }}>
-            <div
-              className="flex items-center gap-2 px-3 py-2 rounded-xl"
-              style={{ backgroundColor: "#f8fafc", border: "1px solid #e2e8f0" }}
-            >
-              <Search className="size-3.5 text-slate-400 shrink-0" />
-              <input
-                ref={searchRef}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Cari ujian atau mata pelajaran..."
-                className="flex-1 text-sm bg-transparent outline-none text-slate-700 placeholder:text-slate-400"
-              />
-              {search && (
-                <button
-                  type="button"
-                  onClick={() => setSearch("")}
-                  className="text-slate-400 hover:text-slate-600"
-                >
-                  <X className="size-3" />
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Items */}
-          <div className="max-h-52 overflow-y-auto p-1.5">
-            {filtered.length === 0 ? (
-              <div className="py-8 text-center">
-                <BookOpen className="size-8 mx-auto mb-2" style={{ color: "#cbd5e1" }} />
-                <p className="text-sm font-medium" style={{ color: "#94a3b8" }}>
-                  {search ? `Tidak ada hasil untuk "${search}"` : "Belum ada ujian"}
-                </p>
+    <div className="flex items-center gap-2">
+      {steps.map((s, i) => {
+        const isActive = s.key === current
+        const isDone = current === "preview" && s.key === "upload"
+        return (
+          <React.Fragment key={s.key}>
+            <div className="flex items-center gap-2">
+              <div
+                className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+                  isDone
+                    ? "bg-white text-teal-700"
+                    : isActive
+                    ? "bg-white text-teal-700 ring-2 ring-white/50"
+                    : "bg-white/20 text-white/60"
+                }`}
+              >
+                {isDone ? <CheckCircle2 className="w-4 h-4 text-teal-600" /> : s.num}
               </div>
-            ) : (
-              filtered.map((u) => {
-                const style = getMapelStyle(u.mapel)
-                const isSelected = u.id === value
-                return (
-                  <button
-                    key={u.id}
-                    type="button"
-                    onClick={() => handleSelect(u.id)}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-150 text-left"
-                    style={{
-                      backgroundColor: isSelected ? "#f0fdfa" : "transparent",
-                      border: `1px solid ${isSelected ? "#99f6e4" : "transparent"}`,
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isSelected) e.currentTarget.style.backgroundColor = "#f8fafc"
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isSelected) e.currentTarget.style.backgroundColor = "transparent"
-                    }}
-                  >
-                    {/* Avatar */}
-                    <div
-                      className="h-9 w-9 rounded-xl flex items-center justify-center shrink-0 text-[11px] font-extrabold"
-                      style={{
-                        backgroundColor: style.bg,
-                        color: style.text,
-                        boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
-                      }}
-                    >
-                      {u.mapel.substring(0, 2).toUpperCase()}
-                    </div>
-
-                    {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-slate-800 truncate leading-tight">
-                        {u.judul}
-                      </p>
-                      <span
-                        className="inline-block text-[10px] font-bold px-2 py-0.5 rounded-full mt-0.5"
-                        style={{ backgroundColor: style.badgeBg, color: style.badgeText }}
-                      >
-                        {u.mapel}
-                      </span>
-                    </div>
-
-                    {/* Checkmark */}
-                    {isSelected && <CheckCircle2 className="size-4 shrink-0" style={{ color: "#14b8a6" }} />}
-                  </button>
-                )
-              })
+              <span
+                className={`text-xs font-medium hidden sm:block ${
+                  isActive ? "text-white" : isDone ? "text-white/80" : "text-white/50"
+                }`}
+              >
+                {s.label}
+              </span>
+            </div>
+            {i < steps.length - 1 && (
+              <div className={`flex-1 h-px mx-1 ${isDone ? "bg-white/60" : "bg-white/20"}`} style={{ minWidth: 20 }} />
             )}
-          </div>
-        </div>
-      )}
+          </React.Fragment>
+        )
+      })}
     </div>
   )
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+//  MAIN COMPONENT
+// ═══════════════════════════════════════════════════════════════════
 export function ImportSoalModal({
+  isOpen,
+  onClose,
   ujianList,
+  defaultUjianId = "",
   onSuccess,
-  children,
-  open,
-  onOpenChange,
 }: ImportSoalModalProps) {
-  const [internalOpen, setInternalOpen] = useState(false)
-  const [ujianId, setUjianId] = useState("")
+  const [ujianId, setUjianId] = useState(defaultUjianId)
   const [file, setFile] = useState<File | null>(null)
-  const [isDragging, setIsDragging] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
-  const [result, setResult] = useState<{
-    success: boolean
-    message: string
-    details?: string[]
-  } | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [fileType, setFileType] = useState<FileType>(null)
+  const [dragging, setDragging] = useState(false)
+  const [step, setStep] = useState<"upload" | "preview">("upload")
+  const [parsedSoal, setParsedSoal] = useState<ParsedSoal[]>([])
+  const [globalBobot, setGlobalBobot] = useState<string>("1")
+  const [globalTipe, setGlobalTipe] = useState<TipeSoal | "">("")
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState<{ success?: string; error?: string; details?: string[] } | null>(null)
+  const [parsing, setParsing] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
 
-  const isOpen = open !== undefined ? open : internalOpen
-  const setIsOpen = onOpenChange || setInternalOpen
+  if (!isOpen) return null
 
-  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0]
-    if (f) { setFile(f); setResult(null) }
-  }, [])
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    setIsDragging(false)
-    const f = e.dataTransfer.files[0]
-    if (f) { setFile(f); setResult(null) }
-  }, [])
-
-  const getFileIcon = (size = "size-10") => {
-    if (!file) return <Upload className={`${size} text-slate-300`} />
-    const ext = file.name.split(".").pop()?.toLowerCase()
-    if (ext === "xlsx" || ext === "xls") return <FileSpreadsheet className={`${size} text-emerald-500`} />
-    if (ext === "docx") return <FileText className={`${size} text-blue-500`} />
-    if (ext === "csv") return <File className={`${size} text-amber-500`} />
-    return <File className={`${size} text-slate-400`} />
+  function detectType(f: File): FileType {
+    const ext = f.name.split(".").pop()?.toLowerCase()
+    if (ext === "xlsx" || ext === "xls") return "excel"
+    if (ext === "csv") return "csv"
+    if (ext === "docx") return "docx"
+    return null
   }
 
-  const handleImport = async () => {
-    if (!ujianId || !file) return
-    setIsLoading(true)
+  async function handleFile(f: File) {
+    const ft = detectType(f)
+    if (!ft) {
+      setResult({ error: "Format file tidak didukung. Gunakan .xlsx, .xls, .csv, atau .docx" })
+      return
+    }
+    setFile(f)
+    setFileType(ft)
     setResult(null)
 
-    try {
-      const ext = file.name.split(".").pop()?.toLowerCase()
-
-      if (ext === "xlsx" || ext === "xls" || ext === "csv") {
-        const XLSX = await import("xlsx")
-        const buffer = await file.arrayBuffer()
-        const workbook = XLSX.read(buffer, { type: "array" })
-        const sheet = workbook.Sheets[workbook.SheetNames[0]]
-        const soalList = XLSX.utils.sheet_to_json(sheet) as Record<string, unknown>[]
-
-        if (soalList.length === 0) {
-          setResult({ success: false, message: "File kosong atau tidak ada data soal" })
-          return
-        }
-
-        // ✅ PERBAIKAN: Tambahkan credentials: "include" agar session NextAuth terkirim
-        const response = await fetch("/api/soal/import", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ ujianId, soalList }),
-        })
-        const data = await response.json()
-
-        if (response.ok) {
-          setResult({ success: true, message: data.message, details: data.errors })
-          setTimeout(() => { setIsOpen(false); resetForm(); onSuccess?.() }, 2000)
-        } else {
-          setResult({ success: false, message: data.error || "Gagal mengimport soal", details: data.details })
-        }
-
-      } else if (ext === "docx") {
-        const formData = new FormData()
-        formData.append("file", file)
-        formData.append("ujianId", ujianId)
-
-        // ✅ PERBAIKAN: Tambahkan credentials: "include" agar session NextAuth terkirim
-        // Jangan set Content-Type header manual — biarkan browser set boundary FormData secara otomatis
-        const response = await fetch("/api/soal/import-file", {
-          method: "POST",
-          credentials: "include",
-          body: formData,
-        })
-
-        // ✅ PERBAIKAN: Cek apakah response berhasil sebelum parse JSON
-        if (!response.ok) {
-          let errorMessage = "Gagal mengimport soal"
-          let details: string[] | undefined
-          try {
-            const data = await response.json()
-            errorMessage = data.error || errorMessage
-            details = data.details
-          } catch {
-            // Jika response bukan JSON (misal 404 HTML page), tangani dengan aman
-            errorMessage = `Server error: ${response.status} ${response.statusText}`
-          }
-          setResult({ success: false, message: errorMessage, details })
-          return
-        }
-
-        const data = await response.json()
-        setResult({ success: true, message: data.message, details: data.errors })
-        setTimeout(() => { setIsOpen(false); resetForm(); onSuccess?.() }, 2000)
-
-      } else {
-        setResult({ success: false, message: "Format tidak didukung. Gunakan .xlsx, .xls, .csv, atau .docx" })
+    if (ft === "excel" || ft === "csv") {
+      setParsing(true)
+      try {
+        const rows = ft === "excel" ? await parseExcelFile(f) : await parseCsvFile(f)
+        setParsedSoal(rows)
+        setStep("preview")
+      } catch {
+        setResult({ error: "Gagal membaca file. Pastikan format sesuai template." })
+      } finally {
+        setParsing(false)
       }
-    } catch (err) {
-      // ✅ PERBAIKAN: Tampilkan pesan error yang lebih spesifik
-      console.error("Import error:", err)
-      if (err instanceof TypeError && (err.message.includes("fetch") || err.message.includes("network"))) {
-        setResult({
-          success: false,
-          message: "Tidak dapat terhubung ke server. Pastikan server berjalan dan coba lagi.",
-        })
-      } else {
-        setResult({ success: false, message: "Terjadi kesalahan saat membaca atau mengimport file" })
-      }
-    } finally {
-      setIsLoading(false)
+    } else {
+      setStep("preview")
+      setParsedSoal([])
     }
   }
 
-  const resetForm = () => {
-    setFile(null)
-    setUjianId("")
-    setResult(null)
-    if (fileInputRef.current) fileInputRef.current.value = ""
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault()
+    setDragging(false)
+    const f = e.dataTransfer.files[0]
+    if (f) handleFile(f)
   }
 
-  const selectedUjian = ujianList.find((u) => u.id === ujianId)
-  const canImport = !!ujianId && !!file && !isLoading
+  function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]
+    if (f) handleFile(f)
+  }
 
+  function applyGlobalBobot() {
+    const parsed = parseFloat(globalBobot)
+    if (isNaN(parsed) || parsed < 1) return
+    setParsedSoal((prev) => prev.map((s) => ({ ...s, bobot: parsed })))
+  }
+
+  function applyGlobalTipe() {
+    if (!globalTipe) return
+    setParsedSoal((prev) =>
+      prev.map((s) => ({
+        ...s,
+        tipe: globalTipe as TipeSoal,
+        kunciJawaban: globalTipe === "ESSAY" ? null : s.kunciJawaban,
+      }))
+    )
+  }
+
+  function updateSoal(idx: number, patch: Partial<ParsedSoal>) {
+    setParsedSoal((prev) => prev.map((s, i) => (i === idx ? { ...s, ...patch } : s)))
+  }
+
+  function removeSoal(idx: number) {
+    setParsedSoal((prev) => prev.filter((_, i) => i !== idx))
+  }
+
+  async function handleSubmit() {
+    if (!ujianId) { setResult({ error: "Pilih ujian terlebih dahulu" }); return }
+    if (!file) { setResult({ error: "Pilih file terlebih dahulu" }); return }
+    setLoading(true)
+    setResult(null)
+    try {
+      if (fileType === "docx") {
+        const fd = new FormData()
+        fd.append("ujianId", ujianId)
+        fd.append("file", file)
+        const res = await fetch("/api/soal/import-file", { method: "POST", body: fd })
+        const json = await res.json()
+        if (!res.ok) throw new Error(json.error || "Gagal import")
+        setResult({ success: json.message, details: json.errors })
+        onSuccess?.()
+      } else {
+        if (parsedSoal.length === 0) { setResult({ error: "Tidak ada soal untuk diimport" }); return }
+        const res = await fetch("/api/soal/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ujianId, soalList: parsedSoal }),
+        })
+        const json = await res.json()
+        if (!res.ok) throw new Error(json.error || "Gagal import")
+        setResult({ success: json.message || `Berhasil import ${json.imported} soal`, details: json.errors })
+        onSuccess?.()
+      }
+    } catch (e: any) {
+      setResult({ error: e.message })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function reset() {
+    setFile(null)
+    setFileType(null)
+    setStep("upload")
+    setParsedSoal([])
+    setResult(null)
+    setGlobalBobot("1")
+    setGlobalTipe("")
+    if (inputRef.current) inputRef.current.value = ""
+  }
+
+  // ── render ─────────────────────────────────────────────────────
   return (
-    <DialogPrimitive.Root
-      open={isOpen}
-      onOpenChange={(o) => { if (!o) resetForm(); setIsOpen(o) }}
-    >
-      <DialogPrimitive.Trigger asChild>
-        {children || (
-          <Button
-            className="gap-2 rounded-xl shadow-md font-semibold"
-            style={{ background: "linear-gradient(135deg, #0d9488, #14b8a6)" }}
-          >
-            <Upload className="size-4" />
-            Import Soal
-          </Button>
-        )}
-      </DialogPrimitive.Trigger>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-sm">
+      {/* Modal — lebar max 5xl, tinggi hingga 95vh */}
+      <div
+        className="relative w-full flex flex-col bg-white rounded-3xl shadow-2xl"
+        style={{ maxWidth: "72rem", maxHeight: "95vh", overflow: "hidden" }}
+      >
 
-      <DialogPrimitive.Portal>
-        {/* Overlay */}
-        <DialogPrimitive.Overlay
-          className="fixed inset-0 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
-          style={{ backgroundColor: "rgba(15,23,42,0.6)", backdropFilter: "blur(4px)", zIndex: 9998 }}
-        />
+        {/* ══════════════════════════════════════════════════
+            HEADER — gradient teal, step indicator, badge format
+        ══════════════════════════════════════════════════ */}
+        <div className="relative shrink-0 bg-gradient-to-br from-teal-700 via-teal-600 to-emerald-500 px-7 py-5 text-white">
+          {/* decorative circles */}
+          <div className="absolute -top-6 -right-6 w-36 h-36 rounded-full bg-white/5 pointer-events-none" />
+          <div className="absolute top-4 right-20 w-16 h-16 rounded-full bg-white/5 pointer-events-none" />
 
-        {/* Dialog — fully opaque using inline styles, never uses CSS variables */}
-        <DialogPrimitive.Content
-          className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-2xl flex flex-col rounded-2xl outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
-          style={{
-            zIndex: 9999,
-            backgroundColor: "#ffffff",
-            boxShadow: "0 32px 96px rgba(0,0,0,0.28), 0 8px 24px rgba(0,0,0,0.12)",
-            maxHeight: "90vh",
-          }}
-        >
-
-          {/* ════ HEADER ════ */}
-          <div
-            className="shrink-0 relative flex items-center justify-between px-6 pt-5 pb-4 rounded-t-2xl"
-            style={{
-              background: "linear-gradient(135deg, #f0fdfa 0%, #ffffff 70%)",
-              borderBottom: "1px solid #f1f5f9",
-            }}
-          >
-            {/* Decorative */}
-            <div
-              className="absolute -top-10 -right-10 w-36 h-36 rounded-full pointer-events-none"
-              style={{ background: "rgba(20,184,166,0.06)" }}
-            />
-
-            <div className="flex items-center gap-3 relative">
-              <div
-                className="flex items-center justify-center w-11 h-11 rounded-xl shrink-0"
-                style={{
-                  background: "linear-gradient(135deg, #0d9488, #14b8a6)",
-                  boxShadow: "0 4px 14px rgba(13,148,136,0.30)",
-                }}
-              >
-                <Database className="size-5 text-white" />
-              </div>
-              <div>
-                <DialogPrimitive.Title className="text-[18px] font-extrabold text-slate-800 leading-tight">
-                  Import Soal
-                </DialogPrimitive.Title>
-                <p className="text-xs text-slate-500 mt-0.5">Upload file soal dalam berbagai format</p>
-              </div>
+          <div className="relative flex items-start gap-4">
+            {/* icon */}
+            <div className="w-12 h-12 rounded-2xl bg-white/15 backdrop-blur-sm flex items-center justify-center shrink-0 mt-0.5">
+              <Upload className="w-6 h-6 text-white" />
             </div>
 
-            <DialogPrimitive.Close
-              className="relative flex items-center justify-center w-8 h-8 rounded-xl transition-all"
-              style={{ color: "#94a3b8" }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = "#f1f5f9"
-                e.currentTarget.style.color = "#475569"
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = "transparent"
-                e.currentTarget.style.color = "#94a3b8"
-              }}
-            >
-              <X className="size-4" />
-            </DialogPrimitive.Close>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-3 flex-wrap">
+                <h2 className="text-xl font-bold tracking-tight">Import Soal</h2>
+                {/* format badges */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {[
+                    { label: "Excel (.xlsx, .xls)", bg: "bg-emerald-500/30 border-emerald-400/40" },
+                    { label: "CSV (.csv)",           bg: "bg-amber-500/30 border-amber-400/40" },
+                    { label: "Word (.docx)",          bg: "bg-blue-500/30 border-blue-400/40" },
+                  ].map((b) => (
+                    <span
+                      key={b.label}
+                      className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full border text-white ${b.bg}`}
+                    >
+                      {b.label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              {/* step indicator */}
+              <div className="mt-3">
+                <StepIndicator current={step} />
+              </div>
+            </div>
           </div>
 
-          {/* ════ BODY (scrollable) ════ */}
-          <div
-            className="flex-1 overflow-y-auto"
-            style={{ backgroundColor: "#ffffff" }}
+          {/* close button */}
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 w-9 h-9 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center transition-all"
           >
-            <div className="p-6 space-y-5">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
 
-              {/* ── Format Badges ── */}
-              <div
-                className="flex flex-wrap gap-2 p-3 rounded-xl"
-                style={{ backgroundColor: "#f8fafc", border: "1px solid #e2e8f0" }}
-              >
-                {[
-                  { icon: <FileSpreadsheet className="size-3.5 text-emerald-500" />, label: "Excel (.xlsx, .xls)", bg: "#f0fdf4", border: "#bbf7d0", color: "#166534" },
-                  { icon: <File className="size-3.5 text-amber-500" />,             label: "CSV (.csv)",          bg: "#fffbeb", border: "#fde68a", color: "#78350f" },
-                  { icon: <FileText className="size-3.5 text-blue-500" />,          label: "Word (.docx)",        bg: "#eff6ff", border: "#bfdbfe", color: "#1e40af" },
-                ].map(({ icon, label, bg, border, color }) => (
-                  <div
-                    key={label}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg"
-                    style={{ backgroundColor: bg, border: `1px solid ${border}` }}
-                  >
-                    {icon}
-                    <span className="text-[11px] font-semibold" style={{ color }}>{label}</span>
+        {/* ══════════════════════════════════════════════════
+            BODY — scrollable
+        ══════════════════════════════════════════════════ */}
+        <div className="flex-1 overflow-y-auto min-h-0 bg-gray-50/60">
+
+          {/* ── STEP 1: Upload ──────────────────────────────── */}
+          {step === "upload" && (
+            <div className="p-6 sm:p-8 space-y-6">
+
+              {/* ── Pilih Ujian Card ── */}
+              <div className="bg-white rounded-2xl border border-gray-200/80 shadow-sm overflow-hidden">
+                {/* card header */}
+                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-xl bg-teal-100 flex items-center justify-center">
+                      <BookOpen className="w-4 h-4 text-teal-600" />
+                    </div>
+                    <h3 className="font-semibold text-gray-800">Informasi Import</h3>
                   </div>
-                ))}
+                  <span className="flex items-center gap-1 text-xs font-medium text-teal-700 bg-teal-50 border border-teal-200 px-2.5 py-1 rounded-full">
+                    <span className="w-1.5 h-1.5 rounded-full bg-teal-500 inline-block" />
+                    Wajib diisi
+                  </span>
+                </div>
+
+                <div className="px-6 py-5">
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-widest mb-2">
+                    <span className="flex items-center gap-1.5">
+                      <BookOpen className="w-3.5 h-3.5 text-teal-500" />
+                      Pilih Ujian <span className="text-red-500">*</span>
+                    </span>
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={ujianId}
+                      onChange={(e) => setUjianId(e.target.value)}
+                      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm appearance-none bg-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent pr-10 transition-shadow"
+                    >
+                      <option value="">Pilih ujian yang akan diisi soal...</option>
+                      {ujianList.map((u) => (
+                        <option key={u.id} value={u.id}>{u.judul} — {u.mapel}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                  </div>
+                </div>
               </div>
 
-              {/* ── Pilih Ujian ── */}
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 text-sm font-bold text-slate-700">
-                  <BookOpen className="size-3.5 text-teal-500" />
-                  Pilih Ujian
-                  <span className="text-red-400 text-xs leading-none">*</span>
-                </label>
-
-                <UjianDropdown ujianList={ujianList} value={ujianId} onChange={setUjianId} />
-
-                {selectedUjian && (
-                  <div
-                    className="flex items-center gap-2 px-3 py-2 rounded-xl"
-                    style={{ backgroundColor: "#f0fdfa", border: "1px solid #99f6e4" }}
-                  >
-                    <CheckCircle2 className="size-3.5 shrink-0" style={{ color: "#14b8a6" }} />
-                    <p className="text-xs font-medium" style={{ color: "#0f766e" }}>
-                      Terpilih:{" "}
-                      <span className="font-bold">{selectedUjian.judul}</span>
-                      <span className="mx-1.5" style={{ color: "#99f6e4" }}>·</span>
-                      <span className="font-semibold">{selectedUjian.mapel}</span>
-                    </p>
+              {/* ── Upload File Card ── */}
+              <div className="bg-white rounded-2xl border border-gray-200/80 shadow-sm overflow-hidden">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-xl bg-teal-100 flex items-center justify-center">
+                      <Upload className="w-4 h-4 text-teal-600" />
+                    </div>
+                    <h3 className="font-semibold text-gray-800">Upload File</h3>
+                    <span className="text-red-500 text-sm">*</span>
                   </div>
-                )}
-              </div>
+                  {/* format type icons */}
+                  <div className="hidden sm:flex items-center gap-2 text-xs text-gray-400">
+                    <span className="flex items-center gap-1 bg-emerald-50 text-emerald-600 border border-emerald-200 px-2 py-0.5 rounded-full font-medium">
+                      <FileSpreadsheet className="w-3 h-3" /> Excel
+                    </span>
+                    <span className="flex items-center gap-1 bg-amber-50 text-amber-600 border border-amber-200 px-2 py-0.5 rounded-full font-medium">
+                      <TableIcon className="w-3 h-3" /> CSV
+                    </span>
+                    <span className="flex items-center gap-1 bg-blue-50 text-blue-600 border border-blue-200 px-2 py-0.5 rounded-full font-medium">
+                      <FileText className="w-3 h-3" /> Word
+                    </span>
+                  </div>
+                </div>
 
-              {/* ── Upload Area ── */}
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 text-sm font-bold text-slate-700">
-                  <Upload className="size-3.5 text-teal-500" />
-                  Upload File
-                  <span className="text-red-400 text-xs leading-none">*</span>
-                </label>
+                <div className="px-6 py-6 space-y-5">
+                  {/* Drop zone */}
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
+                    onDragLeave={() => setDragging(false)}
+                    onDrop={handleDrop}
+                    onClick={() => inputRef.current?.click()}
+                    className={`relative border-2 border-dashed rounded-2xl py-14 flex flex-col items-center justify-center gap-4 cursor-pointer transition-all duration-200 ${
+                      dragging
+                        ? "border-teal-400 bg-teal-50 scale-[1.01]"
+                        : "border-gray-200 hover:border-teal-400 hover:bg-teal-50/30"
+                    }`}
+                  >
+                    <div className={`w-16 h-16 rounded-2xl flex items-center justify-center transition-colors ${dragging ? "bg-teal-100" : "bg-gray-100"}`}>
+                      <Upload className={`w-8 h-8 transition-colors ${dragging ? "text-teal-600" : "text-gray-400"}`} />
+                    </div>
+                    <div className="text-center">
+                      <p className="text-base font-medium text-gray-700">
+                        Drag & drop atau{" "}
+                        <span className="text-teal-600 underline underline-offset-2 font-semibold">klik untuk upload</span>
+                      </p>
+                      <p className="text-sm text-gray-400 mt-1">.xlsx, .xls, .csv, .docx — maks. 200 soal</p>
+                    </div>
+                    <div className="flex items-center gap-3 text-sm text-gray-400">
+                      <span className="flex items-center gap-1.5">
+                        <FileSpreadsheet className="w-4 h-4 text-emerald-500" /> Excel / CSV
+                      </span>
+                      <span className="w-1 h-1 rounded-full bg-gray-300 inline-block" />
+                      <span className="flex items-center gap-1.5">
+                        <FileText className="w-4 h-4 text-blue-500" /> Word (.docx)
+                      </span>
+                    </div>
+                  </div>
+                  <input ref={inputRef} type="file" accept=".xlsx,.xls,.csv,.docx" className="hidden" onChange={handleInputChange} />
 
-                <div
-                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
-                  onDragLeave={() => setIsDragging(false)}
-                  onDrop={handleDrop}
-                  onClick={() => fileInputRef.current?.click()}
-                  className="relative flex flex-col items-center justify-center gap-3 p-7 rounded-xl border-2 border-dashed cursor-pointer transition-all duration-200"
-                  style={{
-                    borderColor: isDragging ? "#14b8a6" : file ? "#5eead4" : "#cbd5e1",
-                    backgroundColor: isDragging ? "#f0fdfa" : file ? "#f8fffd" : "#fafafa",
-                    transform: isDragging ? "scale(1.01)" : "scale(1)",
-                  }}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".xlsx,.xls,.csv,.docx"
-                    onChange={handleFileSelect}
-                    className="hidden"
-                  />
-
-                  {!file ? (
-                    <>
-                      <div
-                        className="flex items-center justify-center w-16 h-16 rounded-2xl"
-                        style={{ backgroundColor: "#f1f5f9" }}
-                      >
-                        <Upload className="size-7 text-slate-400" />
-                      </div>
-                      <div className="text-center">
-                        <p className="text-sm font-semibold text-slate-700">
-                          Drag & drop atau{" "}
-                          <span style={{ color: "#0d9488", textDecoration: "underline", textUnderlineOffset: "3px" }}>
-                            klik untuk upload
-                          </span>
-                        </p>
-                        <p className="text-xs text-slate-400 mt-1">
-                          .xlsx, .xls, .csv, .docx — maks. 200 soal
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-4 text-[11px] font-medium text-slate-400">
-                        <span className="flex items-center gap-1.5">
-                          <FileSpreadsheet className="size-3.5 text-emerald-400" /> Excel / CSV
-                        </span>
-                        <span className="w-1 h-1 rounded-full bg-slate-300" />
-                        <span className="flex items-center gap-1.5">
-                          <FileText className="size-3.5 text-blue-400" /> Word (.docx)
-                        </span>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="flex items-center gap-4 w-full">
-                      <div
-                        className="flex items-center justify-center w-14 h-14 rounded-2xl shrink-0"
-                        style={{ backgroundColor: "#ffffff", boxShadow: "0 2px 12px rgba(0,0,0,0.08)" }}
-                      >
-                        {getFileIcon()}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-slate-800 truncate">{file.name}</p>
-                        <p className="text-xs text-slate-400 mt-0.5">
-                          {(file.size / 1024).toFixed(1)} KB
-                        </p>
-                        <div className="flex items-center gap-2 mt-1.5">
-                          <div
-                            className="h-1.5 w-20 rounded-full overflow-hidden"
-                            style={{ backgroundColor: "#ccfbf1" }}
-                          >
-                            <div className="h-full w-full rounded-full" style={{ backgroundColor: "#14b8a6" }} />
-                          </div>
-                          <span className="text-[10px] font-bold" style={{ color: "#0d9488" }}>
-                            Siap diimport
-                          </span>
+                  {/* Format info — 2 columns */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="border border-emerald-200 bg-emerald-50 rounded-xl p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center">
+                          <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
                         </div>
+                        <span className="text-sm font-semibold text-emerald-700">Excel / CSV</span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setFile(null)
-                          if (fileInputRef.current) fileInputRef.current.value = ""
-                        }}
-                        className="flex items-center justify-center w-8 h-8 rounded-xl transition-colors shrink-0"
-                        style={{ color: "#94a3b8" }}
-                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f1f5f9")}
-                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                      <p className="text-xs text-emerald-600 mb-1.5">Kolom wajib:</p>
+                      <code className="text-xs text-emerald-700 bg-emerald-100 border border-emerald-200 px-2 py-1 rounded-lg block">
+                        pertanyaan, opsiA, opsiB, kunciJawaban
+                      </code>
+                    </div>
+                    <div className="border border-blue-200 bg-blue-50 rounded-xl p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-7 h-7 rounded-lg bg-blue-100 flex items-center justify-center">
+                          <FileText className="w-4 h-4 text-blue-600" />
+                        </div>
+                        <span className="text-sm font-semibold text-blue-700">Word (.docx)</span>
+                      </div>
+                      <p className="text-xs text-blue-600 mb-1.5">Format:</p>
+                      <code className="text-xs text-blue-700 bg-blue-100 border border-blue-200 px-2 py-1 rounded-lg block">
+                        1. Soal? A. Opsi Kunci: A
+                      </code>
+                    </div>
+                  </div>
+
+                  {/* Download template */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); downloadTemplate() }}
+                    className="w-full flex items-center justify-between px-5 py-3.5 border border-gray-200 rounded-xl hover:bg-gray-50 hover:border-teal-300 transition-all group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-teal-100 flex items-center justify-center group-hover:bg-teal-200 transition-colors">
+                        <Download className="w-4 h-4 text-teal-600" />
+                      </div>
+                      <div className="text-left">
+                        <p className="text-sm font-semibold text-gray-700">Download Template Excel</p>
+                        <p className="text-xs text-gray-400">Gunakan template agar format soal sesuai</p>
+                      </div>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-teal-500 transition-colors" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Parsing loader */}
+              {parsing && (
+                <div className="flex items-center gap-3 text-teal-600 text-sm bg-teal-50 border border-teal-200 rounded-xl px-4 py-3">
+                  <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                  Membaca file...
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── STEP 2: Preview & Edit ──────────────────────── */}
+          {step === "preview" && (
+            <div className="p-6 sm:p-8 space-y-6">
+
+              {/* File info banner */}
+              <div className="flex items-center gap-3 px-5 py-3.5 bg-teal-50 border border-teal-200 rounded-2xl">
+                <div className="w-9 h-9 rounded-xl bg-teal-100 flex items-center justify-center shrink-0">
+                  <File className="w-4 h-4 text-teal-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-teal-800 truncate">{file?.name}</p>
+                  <p className="text-xs text-teal-600 mt-0.5">
+                    {fileType === "docx"
+                      ? "File Word akan diproses di server"
+                      : `${parsedSoal.length} soal terdeteksi`}
+                  </p>
+                </div>
+                <button
+                  onClick={reset}
+                  className="text-xs font-medium text-teal-600 hover:text-teal-800 bg-white border border-teal-200 hover:border-teal-400 px-3 py-1.5 rounded-lg transition-all shrink-0"
+                >
+                  Ganti file
+                </button>
+              </div>
+
+              {/* Informasi Soal Card */}
+              <div className="bg-white rounded-2xl border border-gray-200/80 shadow-sm overflow-hidden">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-xl bg-teal-100 flex items-center justify-center">
+                      <BookOpen className="w-4 h-4 text-teal-600" />
+                    </div>
+                    <h3 className="font-semibold text-gray-800">Informasi Soal</h3>
+                  </div>
+                  <span className="flex items-center gap-1 text-xs font-medium text-teal-700 bg-teal-50 border border-teal-200 px-2.5 py-1 rounded-full">
+                    <span className="w-1.5 h-1.5 rounded-full bg-teal-500 inline-block" />
+                    Wajib diisi
+                  </span>
+                </div>
+
+                <div className="px-6 py-5 space-y-5">
+                  {/* Pilih Ujian */}
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-widest mb-2">
+                      <span className="flex items-center gap-1.5">
+                        <BookOpen className="w-3.5 h-3.5 text-teal-500" />
+                        Pilih Ujian <span className="text-red-500">*</span>
+                      </span>
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={ujianId}
+                        onChange={(e) => setUjianId(e.target.value)}
+                        className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm appearance-none bg-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent pr-10 transition-shadow"
                       >
-                        <X className="size-4" />
-                      </button>
+                        <option value="">Pilih ujian...</option>
+                        {ujianList.map((u) => (
+                          <option key={u.id} value={u.id}>{u.judul} — {u.mapel}</option>
+                        ))}
+                      </select>
+                      <ChevronDown className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
                     </div>
-                  )}
+                  </div>
+
+                  {/* Global controls — Tipe & Bobot */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* Tipe global */}
+                    <div className="bg-violet-50 border border-violet-100 rounded-xl p-4">
+                      <label className="block text-xs font-semibold text-violet-600 uppercase tracking-widest mb-2.5 flex items-center gap-1.5">
+                        <Layers className="w-3.5 h-3.5" /> Tipe Soal (atur semua)
+                      </label>
+                      <div className="flex gap-2">
+                        <div className="relative flex-1">
+                          <select
+                            value={globalTipe}
+                            onChange={(e) => setGlobalTipe(e.target.value as TipeSoal | "")}
+                            className="w-full border border-violet-200 rounded-lg px-3 py-2.5 text-sm appearance-none bg-white focus:outline-none focus:ring-2 focus:ring-violet-400 pr-8"
+                          >
+                            <option value="">— pilih —</option>
+                            <option value="PILIHAN_GANDA">Pilihan Ganda</option>
+                            <option value="ESSAY">Essay</option>
+                          </select>
+                          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-violet-400 pointer-events-none" />
+                        </div>
+                        <button
+                          onClick={applyGlobalTipe}
+                          disabled={!globalTipe}
+                          className="px-3.5 py-2 text-xs font-semibold bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Terapkan
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Bobot global */}
+                    <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">
+                      <label className="block text-xs font-semibold text-amber-600 uppercase tracking-widest mb-2.5 flex items-center gap-1.5">
+                        <Star className="w-3.5 h-3.5" /> Bobot Nilai (atur semua)
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="number"
+                          min={1}
+                          value={globalBobot}
+                          onChange={(e) => setGlobalBobot(e.target.value)}
+                          className="flex-1 border border-amber-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
+                        />
+                        <button
+                          onClick={applyGlobalBobot}
+                          className="px-3.5 py-2 text-xs font-semibold bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors"
+                        >
+                          Terapkan
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              {/* ── Format Guide Cards ── */}
-              <div className="grid grid-cols-2 gap-3">
-                <div
-                  className="p-4 rounded-xl"
-                  style={{ backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0" }}
-                >
-                  <div className="flex items-center gap-2 mb-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-emerald-100 flex items-center justify-center">
-                      <FileSpreadsheet className="size-4 text-emerald-600" />
-                    </div>
-                    <span className="text-xs font-extrabold text-emerald-800">Excel / CSV</span>
+              {/* Daftar Soal preview (Excel/CSV) */}
+              {fileType !== "docx" && parsedSoal.length > 0 && (
+                <div className="bg-white rounded-2xl border border-gray-200/80 shadow-sm overflow-hidden">
+                  <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                    <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                      <Hash className="w-4 h-4 text-teal-500" />
+                      Pratinjau Soal
+                      <span className="ml-1 text-xs font-semibold text-teal-600 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-full">
+                        {parsedSoal.length} soal
+                      </span>
+                    </h3>
+                    <span className="text-xs text-gray-400">Klik untuk edit per soal</span>
                   </div>
-                  <p className="text-[10px] text-slate-600 leading-relaxed">
-                    Kolom wajib:{" "}
-                    <code
-                      className="px-1.5 py-0.5 rounded-md text-[9px] font-bold"
-                      style={{ backgroundColor: "#dcfce7", color: "#166534" }}
-                    >
-                      pertanyaan, opsiA, opsiB, kunciJawaban
-                    </code>
-                  </p>
-                </div>
-
-                <div
-                  className="p-4 rounded-xl"
-                  style={{ backgroundColor: "#eff6ff", border: "1px solid #bfdbfe" }}
-                >
-                  <div className="flex items-center gap-2 mb-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                      <FileText className="size-4 text-blue-600" />
-                    </div>
-                    <span className="text-xs font-extrabold text-blue-800">Word (.docx)</span>
+                  <div className="p-5 space-y-3 max-h-[38vh] overflow-y-auto">
+                    {parsedSoal.map((soal, idx) => (
+                      <SoalPreviewCard
+                        key={idx}
+                        soal={soal}
+                        index={idx}
+                        onChange={(patch) => updateSoal(idx, patch)}
+                        onRemove={() => removeSoal(idx)}
+                      />
+                    ))}
                   </div>
-                  <p className="text-[10px] text-slate-600 leading-relaxed">
-                    Format:{" "}
-                    <code
-                      className="px-1.5 py-0.5 rounded-md text-[9px] font-bold"
-                      style={{ backgroundColor: "#dbeafe", color: "#1e40af" }}
-                    >
-                      1. Soal? A. Opsi Kunci: A
-                    </code>
-                  </p>
                 </div>
-              </div>
+              )}
 
-              {/* ── Result Alert ── */}
-              {result && (
-                <div
-                  className="flex items-start gap-3 p-4 rounded-xl"
-                  style={{
-                    backgroundColor: result.success ? "#f0fdf4" : "#fef2f2",
-                    border: `1px solid ${result.success ? "#bbf7d0" : "#fecaca"}`,
-                  }}
-                >
-                  {result.success ? (
-                    <CheckCircle2 className="size-5 shrink-0 mt-0.5" style={{ color: "#16a34a" }} />
-                  ) : (
-                    <AlertCircle className="size-5 shrink-0 mt-0.5" style={{ color: "#dc2626" }} />
-                  )}
-                  <div className="flex-1">
-                    <p
-                      className="text-sm font-bold"
-                      style={{ color: result.success ? "#166534" : "#991b1b" }}
-                    >
-                      {result.message}
+              {/* Word info notice */}
+              {fileType === "docx" && (
+                <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5 flex items-start gap-4">
+                  <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center shrink-0">
+                    <Sparkles className="w-4 h-4 text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-blue-800">File Word akan diproses di server</p>
+                    <p className="text-xs text-blue-600 mt-1">
+                      Klik "Import Soal" untuk memulai. Soal di-parse otomatis berdasarkan format:
+                      <code className="ml-1 bg-blue-100 border border-blue-200 px-1.5 py-0.5 rounded text-blue-700">
+                        1. Pertanyaan A. Opsi Kunci: A
+                      </code>
                     </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Result messages ── */}
+          {result && (
+            <div className="px-6 sm:px-8 pb-5">
+              {result.success && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 flex items-start gap-4">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-emerald-800">{result.success}</p>
                     {result.details && result.details.length > 0 && (
-                      <ul className="mt-2 space-y-0.5 list-disc list-inside text-[11px]" style={{ color: "#dc2626" }}>
-                        {result.details.slice(0, 5).map((d, i) => <li key={i}>{d}</li>)}
-                        {result.details.length > 5 && (
-                          <li>...dan {result.details.length - 5} error lainnya</li>
-                        )}
+                      <ul className="mt-2 space-y-1">
+                        {result.details.map((d, i) => (
+                          <li key={i} className="text-xs text-amber-600 flex items-start gap-1">
+                            <span className="mt-0.5">⚠</span> {d}
+                          </li>
+                        ))}
                       </ul>
                     )}
                   </div>
                 </div>
               )}
+              {result.error && (
+                <div className="bg-red-50 border border-red-200 rounded-2xl p-5 flex items-start gap-4">
+                  <div className="w-9 h-9 rounded-xl bg-red-100 flex items-center justify-center shrink-0">
+                    <AlertCircle className="w-5 h-5 text-red-500" />
+                  </div>
+                  <p className="text-sm text-red-700 font-medium">{result.error}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
-              {/* ── Template Download ── */}
-              <button
-                type="button"
-                onClick={() => window.open("/templates/template-soal.xlsx", "_blank")}
-                className="w-full flex items-center gap-3 p-4 rounded-xl text-left transition-all duration-200 group"
-                style={{ backgroundColor: "#f8fafc", border: "1px solid #e2e8f0" }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = "#f0fdfa"
-                  e.currentTarget.style.borderColor = "#99f6e4"
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = "#f8fafc"
-                  e.currentTarget.style.borderColor = "#e2e8f0"
-                }}
-              >
-                <div
-                  className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-colors"
-                  style={{ backgroundColor: "#ccfbf1" }}
+        {/* ══════════════════════════════════════════════════
+            FOOTER
+        ══════════════════════════════════════════════════ */}
+        <div className="shrink-0 bg-white border-t border-gray-100 px-7 py-4 flex items-center justify-between">
+          <button
+            onClick={step === "preview" ? reset : onClose}
+            className="px-5 py-2.5 text-sm font-semibold text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-xl transition-all"
+          >
+            {step === "preview" ? "← Kembali" : "Batal"}
+          </button>
+
+          {/* step info */}
+          <span className="text-xs text-gray-400 hidden sm:block">
+            {step === "upload" ? "Langkah 1 dari 2" : `Langkah 2 dari 2${parsedSoal.length > 0 ? ` — ${parsedSoal.length} soal siap diimport` : ""}`}
+          </span>
+
+          <button
+            onClick={handleSubmit}
+            disabled={loading || !ujianId || !file || (fileType !== "docx" && parsedSoal.length === 0)}
+            className="flex items-center gap-2 px-6 py-2.5 bg-teal-600 hover:bg-teal-700 active:bg-teal-800 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl shadow-sm shadow-teal-200 transition-all"
+          >
+            {loading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Upload className="w-4 h-4" />
+            )}
+            {loading ? "Mengimport..." : "Import Soal"}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  SoalPreviewCard — editable per-soal row
+// ═══════════════════════════════════════════════════════════════════
+function SoalPreviewCard({
+  soal,
+  index,
+  onChange,
+  onRemove,
+}: {
+  soal: ParsedSoal
+  index: number
+  onChange: (p: Partial<ParsedSoal>) => void
+  onRemove: () => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const opsiKeys = ["A", "B", "C", "D", "E"] as const
+  const opsiFields: Record<string, keyof ParsedSoal> = {
+    A: "opsiA", B: "opsiB", C: "opsiC", D: "opsiD", E: "opsiE",
+  }
+
+  return (
+    <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
+      {/* header */}
+      <div
+        className="flex items-center gap-3 px-4 py-3.5 bg-gray-50/80 cursor-pointer hover:bg-gray-100/80 transition-colors"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="w-7 h-7 rounded-full bg-teal-600 text-white text-xs font-bold flex items-center justify-center shrink-0">
+          {soal.nomor ?? index + 1}
+        </div>
+        <p className="flex-1 text-sm text-gray-700 truncate">
+          {soal.pertanyaan || <span className="text-gray-400 italic">Pertanyaan kosong</span>}
+        </p>
+        <span
+          className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
+            soal.tipe === "PILIHAN_GANDA"
+              ? "bg-teal-100 text-teal-700 border border-teal-200"
+              : "bg-violet-100 text-violet-700 border border-violet-200"
+          }`}
+        >
+          {soal.tipe === "PILIHAN_GANDA" ? "PG" : "Essay"}
+        </span>
+        <span className="text-xs text-amber-600 font-semibold flex items-center gap-1">
+          <Star className="w-3 h-3" />{soal.bobot ?? 1}
+        </span>
+        <ChevronDown
+          className={`w-4 h-4 text-gray-400 transition-transform ${expanded ? "rotate-180" : ""}`}
+        />
+      </div>
+
+      {/* body */}
+      {expanded && (
+        <div className="p-4 space-y-4 border-t border-gray-100">
+          <div>
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">
+              Pertanyaan *
+            </label>
+            <textarea
+              rows={3}
+              value={soal.pertanyaan}
+              onChange={(e) => onChange({ pertanyaan: e.target.value })}
+              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
+              placeholder="Tulis pertanyaan soal..."
+            />
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            {/* Tipe */}
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block flex items-center gap-1">
+                <Layers className="w-3 h-3 text-violet-500" /> Tipe Soal *
+              </label>
+              <div className="relative">
+                <select
+                  value={soal.tipe}
+                  onChange={(e) =>
+                    onChange({
+                      tipe: e.target.value as TipeSoal,
+                      kunciJawaban: e.target.value === "ESSAY" ? null : soal.kunciJawaban,
+                    })
+                  }
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm appearance-none bg-white focus:outline-none focus:ring-2 focus:ring-teal-500 pr-8"
                 >
-                  <Download className="size-4" style={{ color: "#0d9488" }} />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm font-bold text-slate-700">Download Template Excel</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">Gunakan template agar format soal sesuai</p>
-                </div>
-                <ChevronDown
-                  className="size-4 text-slate-300 -rotate-90 shrink-0"
-                />
-              </button>
-
+                  <option value="PILIHAN_GANDA">Pilihan Ganda</option>
+                  <option value="ESSAY">Essay</option>
+                </select>
+                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+              </div>
+            </div>
+            {/* Nomor */}
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block flex items-center gap-1">
+                <Hash className="w-3 h-3 text-gray-400" /> Nomor
+              </label>
+              <input
+                type="number"
+                min={1}
+                value={soal.nomor ?? index + 1}
+                onChange={(e) => onChange({ nomor: parseInt(e.target.value) })}
+                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+              />
+            </div>
+            {/* Bobot */}
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block flex items-center gap-1">
+                <Star className="w-3 h-3 text-amber-500" /> Bobot
+              </label>
+              <input
+                type="number"
+                min={1}
+                value={soal.bobot ?? 1}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value)
+                  onChange({ bobot: isNaN(val) ? 1 : val })
+                }}
+                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+              />
             </div>
           </div>
 
-          {/* ════ FOOTER (always visible) ════ */}
-          <div
-            className="shrink-0 flex items-center justify-between gap-3 px-6 py-4 rounded-b-2xl"
-            style={{ backgroundColor: "#ffffff", borderTop: "1px solid #f1f5f9" }}
-          >
-            <DialogPrimitive.Close asChild>
-              <button
-                type="button"
-                className="flex items-center h-10 px-5 rounded-xl text-sm font-semibold transition-all"
-                style={{ color: "#64748b" }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = "#f1f5f9"
-                  e.currentTarget.style.color = "#1e293b"
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = "transparent"
-                  e.currentTarget.style.color = "#64748b"
-                }}
-              >
-                Batal
-              </button>
-            </DialogPrimitive.Close>
-
-            <button
-              type="button"
-              onClick={handleImport}
-              disabled={!canImport}
-              className="flex items-center gap-2 h-10 px-6 rounded-xl text-white text-sm font-bold transition-all disabled:cursor-not-allowed"
-              style={{
-                background: canImport
-                  ? "linear-gradient(135deg, #0d9488 0%, #0f766e 100%)"
-                  : "#cbd5e1",
-                boxShadow: canImport ? "0 4px 16px rgba(13,148,136,0.35)" : "none",
-                opacity: canImport ? 1 : 0.7,
-              }}
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Memproses...
-                </>
-              ) : (
-                <>
-                  <Upload className="size-4" />
-                  Import Soal
-                </>
+          {/* Pilihan jawaban */}
+          {soal.tipe === "PILIHAN_GANDA" && (
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  Pilihan Jawaban
+                </label>
+                <span className="text-xs text-amber-600">— Klik huruf untuk jadikan kunci</span>
+              </div>
+              <div className="space-y-2">
+                {opsiKeys.map((key) => {
+                  const field = opsiFields[key]
+                  const isKunci = soal.kunciJawaban === key
+                  return (
+                    <div key={key} className="flex items-center gap-2">
+                      <button
+                        onClick={() => onChange({ kunciJawaban: key })}
+                        className={`w-8 h-8 rounded-full text-sm font-bold border-2 flex items-center justify-center shrink-0 transition-all ${
+                          isKunci
+                            ? "bg-teal-600 border-teal-600 text-white shadow-md"
+                            : "bg-white border-gray-300 text-gray-500 hover:border-teal-400"
+                        }`}
+                      >
+                        {key}
+                      </button>
+                      <input
+                        type="text"
+                        value={(soal[field] as string) ?? ""}
+                        onChange={(e) => onChange({ [field]: e.target.value })}
+                        placeholder={`Opsi ${key}${key === "A" || key === "B" ? " (wajib)" : ""}`}
+                        className={`flex-1 border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 transition-colors ${
+                          isKunci ? "border-teal-400 bg-teal-50" : "border-gray-200"
+                        }`}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+              {!soal.kunciJawaban && (
+                <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5" /> Kunci jawaban belum dipilih
+                </p>
               )}
+            </div>
+          )}
+
+          <div className="flex justify-end pt-1">
+            <button
+              onClick={onRemove}
+              className="text-xs font-medium text-red-500 hover:text-red-700 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-all"
+            >
+              Hapus soal ini
             </button>
           </div>
-
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+        </div>
+      )}
+    </div>
   )
 }

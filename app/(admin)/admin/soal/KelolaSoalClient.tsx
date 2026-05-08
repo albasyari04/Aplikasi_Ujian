@@ -2,7 +2,7 @@
 
 // app/(admin)/admin/soal/KelolaSoalClient.tsx
 
-import { useState, useTransition, useMemo } from "react"
+import { useState, useTransition, useMemo, useCallback } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
@@ -95,6 +95,7 @@ interface Props {
   data: {
     soalList: Soal[]
     ujianList: Ujian[]
+    totalSoal?: number
   }
 }
 
@@ -393,12 +394,23 @@ function DeleteConfirmModal({ soal, onClose, onConfirm, isPending }: { soal: Soa
 // ════════════════════════════════════════════════════════════
 // IMPORT MODAL
 // ════════════════════════════════════════════════════════════
-function ImportSoalModal({ open, onClose, ujianList, onSuccess }: { open: boolean; onClose: () => void; ujianList: Ujian[]; onSuccess: () => void }) {
+function ImportSoalModal({
+  open,
+  onClose,
+  ujianList,
+  onSuccess,
+}: {
+  open: boolean
+  onClose: () => void
+  ujianList: Ujian[]
+  onSuccess: (newSoal: Soal[]) => void   // ✅ FIX: callback bawa data soal baru
+}) {
   const [step, setStep] = useState<"upload" | "preview" | "done">("upload")
   const [isDragging, setIsDragging] = useState(false)
   const [parseError, setParseError] = useState<string | null>(null)
   const [isParsing, setIsParsing] = useState(false)
   const [parsed, setParsed] = useState<SoalImportRow[]>([])
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)          // ✅ FIX: simpan file untuk docx
   const [selectedUjian, setSelectedUjian] = useState("")
   const [isImporting, setIsImporting] = useState(false)
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
@@ -406,54 +418,130 @@ function ImportSoalModal({ open, onClose, ujianList, onSuccess }: { open: boolea
   const [detectedHeaders, setDetectedHeaders] = useState<string[]>([])
 
   const reset = () => {
-    setStep("upload"); setParsed([]); setParseError(null); setImportResult(null); setImportError(null); setSelectedUjian(""); setDetectedHeaders([])
+    setStep("upload")
+    setParsed([])
+    setSelectedFile(null)
+    setParseError(null)
+    setImportResult(null)
+    setImportError(null)
+    setSelectedUjian("")
+    setDetectedHeaders([])
   }
   const handleClose = () => { reset(); onClose() }
 
   const processFile = async (f: File) => {
-    setParseError(null); setIsParsing(true)
+    setParseError(null)
+    setIsParsing(true)
+    setSelectedFile(f)  // ✅ FIX: selalu simpan file referensi
     try {
       const ext = f.name.split(".").pop()?.toLowerCase()
       let rows: SoalImportRow[] = []
       if (ext === "xlsx" || ext === "xls" || ext === "csv") {
         const result = await parseExcel(f)
-        rows = result.rows; setDetectedHeaders(result.headers)
+        rows = result.rows
+        setDetectedHeaders(result.headers)
         if (result.rows.length === 0 && result.headers.length > 0) {
-          setParseError(`Tidak ada soal valid. Kolom: ${result.headers.join(", ")}. Pastikan ada kolom 'pertanyaan', 'opsiA', 'kunciJawaban'.`); return
+          setParseError(`Tidak ada soal valid. Kolom: ${result.headers.join(", ")}. Pastikan ada kolom 'pertanyaan', 'opsiA', 'kunciJawaban'.`)
+          return
         }
+        setParsed(rows)
+        setStep("preview")
       } else if (ext === "docx") {
-        rows = await parseWord(f)
+        // ✅ FIX: Untuk docx, langsung ke step preview tanpa parse client-side.
+        // Parse dilakukan server-side saat handleImport dipanggil.
+        setParsed([])
+        setStep("preview")
       } else {
-        setParseError("Format tidak didukung. Gunakan .xlsx, .xls, .csv, atau .docx"); return
+        setParseError("Format tidak didukung. Gunakan .xlsx, .xls, .csv, atau .docx")
+        return
       }
-      if (rows.length === 0) { setParseError("Tidak ada data soal yang dapat dibaca dari file ini."); return }
-      setParsed(rows); setStep("preview")
-    } catch { setParseError("Gagal membaca file. Pastikan format sesuai template.") }
-    finally { setIsParsing(false) }
+      if (ext !== "docx" && rows.length === 0) {
+        setParseError("Tidak ada data soal yang dapat dibaca dari file ini.")
+        return
+      }
+    } catch {
+      setParseError("Gagal membaca file. Pastikan format sesuai template.")
+    } finally {
+      setIsParsing(false)
+    }
   }
 
   const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault(); setIsDragging(false)
-    const f = e.dataTransfer.files[0]; if (f) processFile(f)
+    e.preventDefault()
+    setIsDragging(false)
+    const f = e.dataTransfer.files[0]
+    if (f) processFile(f)
   }
 
+  // ✅ FIX: handleImport sekarang menangani DOCX via FormData ke /api/soal/import-file
+  // dan Excel/CSV via JSON ke /api/soal/import — lalu re-fetch soal baru untuk update UI
   const handleImport = async () => {
     if (!selectedUjian) { setImportError("Pilih ujian tujuan terlebih dahulu"); return }
-    setIsImporting(true); setImportError(null)
+    setIsImporting(true)
+    setImportError(null)
     try {
-      const res = await fetch("/api/soal/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ujianId: selectedUjian, soalList: parsed }) })
-      const data = await res.json()
-      if (!res.ok) {
-        let errMsg = data.error || "Gagal mengimport soal"
-        if (data.details?.length > 0) { errMsg += "\n\nDetail:\n" + data.details.slice(0, 5).join("\n"); if (data.details.length > 5) errMsg += `\n... dan ${data.details.length - 5} lainnya` }
-        if (data.hint) errMsg += "\n\n" + data.hint
-        setImportError(errMsg); return
+      const ext = selectedFile?.name.split(".").pop()?.toLowerCase()
+      let data: any
+
+      if (ext === "docx" && selectedFile) {
+        // ✅ FIX BUG 4: Kirim file docx ke server untuk di-parse
+        const fd = new FormData()
+        fd.append("ujianId", selectedUjian)
+        fd.append("file", selectedFile)
+        const res = await fetch("/api/soal/import-file", { method: "POST", body: fd })
+        data = await res.json()
+        if (!res.ok) {
+          let errMsg = data.error || "Gagal mengimport soal"
+          if (data.details?.length > 0) {
+            errMsg += "\n\nDetail:\n" + data.details.slice(0, 5).join("\n")
+            if (data.details.length > 5) errMsg += `\n... dan ${data.details.length - 5} lainnya`
+          }
+          setImportError(errMsg)
+          return
+        }
+      } else {
+        // Excel / CSV — kirim JSON hasil parse client-side
+        if (parsed.length === 0) { setImportError("Tidak ada soal untuk diimport"); return }
+        const res = await fetch("/api/soal/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ujianId: selectedUjian, soalList: parsed }),
+        })
+        data = await res.json()
+        if (!res.ok) {
+          let errMsg = data.error || "Gagal mengimport soal"
+          if (data.details?.length > 0) {
+            errMsg += "\n\nDetail:\n" + data.details.slice(0, 5).join("\n")
+            if (data.details.length > 5) errMsg += `\n... dan ${data.details.length - 5} lainnya`
+          }
+          if (data.hint) errMsg += "\n\n" + data.hint
+          setImportError(errMsg)
+          return
+        }
       }
-      setImportResult(data); setStep("done")
-    } catch { setImportError("Koneksi gagal. Coba lagi.") }
-    finally { setIsImporting(false) }
+
+      // ✅ FIX BUG 1 & 2: Re-fetch soal yang baru diimport agar UI langsung update
+      // tanpa bergantung pada router.refresh() + cache revalidation
+      const totalImported = data.imported ?? 0
+      const skipped = (data.total ?? totalImported) - totalImported
+      setImportResult({ imported: totalImported, skipped, errors: data.errors })
+
+      // Fetch soal terbaru dari ujian yang dipilih
+      const soalRes = await fetch(`/api/soal?ujianId=${selectedUjian}&limit=100`)
+      const soalData = await soalRes.json()
+      const newSoal: Soal[] = soalData.data ?? []
+
+      setStep("done")
+      // ✅ FIX BUG 2: Panggil onSuccess dengan data soal baru
+      onSuccess(newSoal)
+    } catch {
+      setImportError("Koneksi gagal. Coba lagi.")
+    } finally {
+      setIsImporting(false)
+    }
   }
 
+  const isDocx = selectedFile?.name.split(".").pop()?.toLowerCase() === "docx"
   const pgCount = parsed.filter((s) => s.tipe === "PILIHAN_GANDA").length
   const essayCount = parsed.filter((s) => s.tipe === "ESSAY").length
 
@@ -473,7 +561,7 @@ function ImportSoalModal({ open, onClose, ujianList, onSuccess }: { open: boolea
               <DialogTitle className="text-[10px] font-black text-white/50 uppercase tracking-[0.15em] mb-0.5">Import Soal</DialogTitle>
               <p className="text-base font-black text-white leading-tight">
                 {step === "upload" && "Upload File Soal"}
-                {step === "preview" && `${parsed.length} soal siap diimport`}
+                {step === "preview" && (isDocx ? `File Word siap diimport` : `${parsed.length} soal siap diimport`)}
                 {step === "done" && "Import Selesai!"}
               </p>
             </div>
@@ -564,6 +652,22 @@ function ImportSoalModal({ open, onClose, ujianList, onSuccess }: { open: boolea
           {/* STEP: PREVIEW */}
           {step === "preview" && (
             <div className="p-5 space-y-3.5">
+              {/* File info */}
+              {selectedFile && (
+                <div className="flex items-center gap-3 p-3 rounded-xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700">
+                  <div className="w-8 h-8 rounded-lg bg-teal-100 dark:bg-teal-900/40 flex items-center justify-center shrink-0">
+                    {isDocx ? <FileText className="size-4 text-violet-500" /> : <FileSpreadsheet className="size-4 text-emerald-500" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-slate-700 dark:text-zinc-200 truncate">{selectedFile.name}</p>
+                    <p className="text-[10px] text-slate-400 dark:text-zinc-500">
+                      {isDocx ? "File Word akan diproses server" : `${parsed.length} soal terdeteksi`}
+                    </p>
+                  </div>
+                  <button onClick={reset} className="text-xs text-teal-600 dark:text-teal-400 font-bold hover:underline shrink-0">Ganti file</button>
+                </div>
+              )}
+
               {/* Pilih ujian */}
               <div className="space-y-1.5">
                 <label className="text-[9px] font-black text-slate-400 dark:text-zinc-500 uppercase tracking-[0.12em]">
@@ -577,8 +681,18 @@ function ImportSoalModal({ open, onClose, ujianList, onSuccess }: { open: boolea
                 </NativeSelect>
               </div>
 
-              {/* Column warning */}
-              {detectedHeaders.length > 0 && (() => {
+              {/* Info docx */}
+              {isDocx && (
+                <div className="flex items-start gap-2.5 p-3.5 rounded-xl bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-800">
+                  <Info className="size-3.5 text-violet-500 shrink-0 mt-0.5" />
+                  <p className="text-xs text-violet-700 dark:text-violet-300 leading-relaxed">
+                    File Word akan diproses di server. Pastikan format soal sudah benar: <code className="bg-violet-100 dark:bg-violet-900 px-1 rounded">1. Pertanyaan</code> · <code className="bg-violet-100 dark:bg-violet-900 px-1 rounded">A. Opsi</code> · <code className="bg-violet-100 dark:bg-violet-900 px-1 rounded">Kunci: A</code>
+                  </p>
+                </div>
+              )}
+
+              {/* Column warning (hanya untuk Excel/CSV) */}
+              {!isDocx && detectedHeaders.length > 0 && (() => {
                 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9]/g, "")
                 const normHeaders = detectedHeaders.map(norm)
                 const hasOpsiA = normHeaders.some(h => ["a","opsia","opsi_a","piliha","pilihana","jawabana","optiona","pilihan1"].includes(h))
@@ -596,52 +710,56 @@ function ImportSoalModal({ open, onClose, ujianList, onSuccess }: { open: boolea
                 )
               })()}
 
-              {/* Stats */}
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { label: "Total", value: parsed.length, bg: "bg-teal-50 dark:bg-teal-950/20", border: "border-teal-100 dark:border-teal-900", val: "text-teal-700 dark:text-teal-300", lbl: "text-teal-500" },
-                  { label: "Pilihan Ganda", value: pgCount, bg: "bg-blue-50 dark:bg-blue-950/20", border: "border-blue-100 dark:border-blue-900", val: "text-blue-700 dark:text-blue-300", lbl: "text-blue-500" },
-                  { label: "Essay", value: essayCount, bg: "bg-violet-50 dark:bg-violet-950/20", border: "border-violet-100 dark:border-violet-900", val: "text-violet-700 dark:text-violet-300", lbl: "text-violet-500" },
-                ].map(({ label, value, bg, border, val, lbl }) => (
-                  <div key={label} className={`p-3 rounded-xl ${bg} border ${border} text-center`}>
-                    <p className={`text-2xl font-black ${val}`}>{value}</p>
-                    <p className={`text-[10px] font-bold ${lbl} mt-0.5`}>{label}</p>
-                  </div>
-                ))}
-              </div>
-
-              {/* Preview list */}
-              <div className="rounded-2xl border border-slate-100 dark:border-zinc-800 overflow-hidden bg-white dark:bg-zinc-900">
-                <div className="flex items-center gap-2 px-4 py-2.5 bg-slate-50 dark:bg-zinc-800/50 border-b border-slate-100 dark:border-zinc-800">
-                  <Eye className="size-3.5 text-slate-400" />
-                  <span className="text-[10px] font-black text-slate-400 dark:text-zinc-500 uppercase tracking-[0.12em]">Preview (10 pertama)</span>
-                </div>
-                <div className="divide-y divide-slate-100 dark:divide-zinc-800 max-h-52 overflow-y-auto">
-                  {parsed.slice(0, 10).map((soal, i) => (
-                    <div key={i} className="flex items-start gap-3 px-4 py-2.5">
-                      <div className="flex items-center justify-center w-6 h-6 rounded-lg text-white text-[10px] font-black shrink-0 bg-gradient-to-br from-teal-500 to-emerald-700 mt-0.5">
-                        {soal.nomor ?? i + 1}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 mb-0.5">
-                          <TipeBadge tipe={soal.tipe} small />
-                          {soal.kunciJawaban && (
-                            <span className="text-[9px] font-bold text-teal-600 bg-teal-50 dark:bg-teal-950/30 px-1.5 py-[1px] rounded-full border border-teal-200 dark:border-teal-800">
-                              Kunci: {soal.kunciJawaban}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-slate-700 dark:text-zinc-300 line-clamp-1 leading-snug">{soal.pertanyaan}</p>
-                      </div>
+              {/* Stats (hanya untuk Excel/CSV) */}
+              {!isDocx && (
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { label: "Total", value: parsed.length, bg: "bg-teal-50 dark:bg-teal-950/20", border: "border-teal-100 dark:border-teal-900", val: "text-teal-700 dark:text-teal-300", lbl: "text-teal-500" },
+                    { label: "Pilihan Ganda", value: pgCount, bg: "bg-blue-50 dark:bg-blue-950/20", border: "border-blue-100 dark:border-blue-900", val: "text-blue-700 dark:text-blue-300", lbl: "text-blue-500" },
+                    { label: "Essay", value: essayCount, bg: "bg-violet-50 dark:bg-violet-950/20", border: "border-violet-100 dark:border-violet-900", val: "text-violet-700 dark:text-violet-300", lbl: "text-violet-500" },
+                  ].map(({ label, value, bg, border, val, lbl }) => (
+                    <div key={label} className={`p-3 rounded-xl ${bg} border ${border} text-center`}>
+                      <p className={`text-2xl font-black ${val}`}>{value}</p>
+                      <p className={`text-[10px] font-bold ${lbl} mt-0.5`}>{label}</p>
                     </div>
                   ))}
-                  {parsed.length > 10 && (
-                    <div className="px-4 py-2.5 text-center text-xs text-slate-400 dark:text-zinc-500 bg-slate-50 dark:bg-zinc-800/30">
-                      +{parsed.length - 10} soal lainnya
-                    </div>
-                  )}
                 </div>
-              </div>
+              )}
+
+              {/* Preview list (hanya untuk Excel/CSV) */}
+              {!isDocx && parsed.length > 0 && (
+                <div className="rounded-2xl border border-slate-100 dark:border-zinc-800 overflow-hidden bg-white dark:bg-zinc-900">
+                  <div className="flex items-center gap-2 px-4 py-2.5 bg-slate-50 dark:bg-zinc-800/50 border-b border-slate-100 dark:border-zinc-800">
+                    <Eye className="size-3.5 text-slate-400" />
+                    <span className="text-[10px] font-black text-slate-400 dark:text-zinc-500 uppercase tracking-[0.12em]">Preview (10 pertama)</span>
+                  </div>
+                  <div className="divide-y divide-slate-100 dark:divide-zinc-800 max-h-52 overflow-y-auto">
+                    {parsed.slice(0, 10).map((soal, i) => (
+                      <div key={i} className="flex items-start gap-3 px-4 py-2.5">
+                        <div className="flex items-center justify-center w-6 h-6 rounded-lg text-white text-[10px] font-black shrink-0 bg-gradient-to-br from-teal-500 to-emerald-700 mt-0.5">
+                          {soal.nomor ?? i + 1}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            <TipeBadge tipe={soal.tipe} small />
+                            {soal.kunciJawaban && (
+                              <span className="text-[9px] font-bold text-teal-600 bg-teal-50 dark:bg-teal-950/30 px-1.5 py-[1px] rounded-full border border-teal-200 dark:border-teal-800">
+                                Kunci: {soal.kunciJawaban}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-700 dark:text-zinc-300 line-clamp-1 leading-snug">{soal.pertanyaan}</p>
+                        </div>
+                      </div>
+                    ))}
+                    {parsed.length > 10 && (
+                      <div className="px-4 py-2.5 text-center text-xs text-slate-400 dark:text-zinc-500 bg-slate-50 dark:bg-zinc-800/30">
+                        +{parsed.length - 10} soal lainnya
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {importError && (
                 <div className="flex items-start gap-2.5 p-3 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 max-h-40 overflow-y-auto">
@@ -654,8 +772,17 @@ function ImportSoalModal({ open, onClose, ujianList, onSuccess }: { open: boolea
                 <button onClick={reset} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-bold text-slate-600 dark:text-zinc-300 border border-slate-200 dark:border-zinc-700 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-all">
                   <X className="size-3.5" /> Ganti File
                 </button>
-                <button onClick={handleImport} disabled={isImporting || !selectedUjian} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-teal-600 to-emerald-700 hover:from-teal-700 hover:to-emerald-800 shadow-lg shadow-teal-500/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]">
-                  {isImporting ? <><Loader2 className="size-4 animate-spin" /> Mengimport...</> : <><Sparkles className="size-4" /> Import {parsed.length} Soal <ArrowRight className="size-4" /></>}
+                <button
+                  onClick={handleImport}
+                  disabled={isImporting || !selectedUjian || (!isDocx && parsed.length === 0)}
+                  className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-teal-600 to-emerald-700 hover:from-teal-700 hover:to-emerald-800 shadow-lg shadow-teal-500/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]"
+                >
+                  {isImporting
+                    ? <><Loader2 className="size-4 animate-spin" /> Mengimport...</>
+                    : isDocx
+                      ? <><Sparkles className="size-4" /> Import File Word <ArrowRight className="size-4" /></>
+                      : <><Sparkles className="size-4" /> Import {parsed.length} Soal <ArrowRight className="size-4" /></>
+                  }
                 </button>
               </div>
             </div>
@@ -677,7 +804,7 @@ function ImportSoalModal({ open, onClose, ujianList, onSuccess }: { open: boolea
                   <p className="text-xs font-bold text-teal-500 mt-0.5">Berhasil diimport</p>
                 </div>
                 <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800">
-                  <p className="text-3xl font-black text-amber-600 dark:text-amber-400">{importResult.skipped}</p>
+                  <p className="text-3xl font-black text-amber-600 dark:text-amber-400">{importResult.skipped ?? 0}</p>
                   <p className="text-xs font-bold text-amber-500 mt-0.5">Dilewati / error</p>
                 </div>
               </div>
@@ -688,8 +815,8 @@ function ImportSoalModal({ open, onClose, ujianList, onSuccess }: { open: boolea
                 </div>
               )}
               <div className="flex gap-2.5 w-full">
-                <button onClick={() => { handleClose(); onSuccess() }} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-teal-600 to-emerald-700 shadow-lg shadow-teal-500/25 transition-all active:scale-[0.98]">
-                  <CheckCircle2 className="size-4" /> Selesai & Refresh
+                <button onClick={handleClose} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-teal-600 to-emerald-700 shadow-lg shadow-teal-500/25 transition-all active:scale-[0.98]">
+                  <CheckCircle2 className="size-4" /> Selesai
                 </button>
                 <button onClick={reset} className="px-4 py-2.5 rounded-xl text-sm font-bold text-slate-600 dark:text-zinc-300 border border-slate-200 dark:border-zinc-700 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-all">
                   Import Lagi
@@ -881,9 +1008,12 @@ function MapelGroup({
 // MAIN COMPONENT
 // ════════════════════════════════════════════════════════════
 export function KelolaSoalClient({ data }: Props) {
-  const { soalList, ujianList } = data
+  const { ujianList } = data
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
+
+  // ✅ FIX BUG 2: soalList disimpan di state lokal agar bisa diupdate setelah import
+  const [soalList, setSoalList] = useState<Soal[]>(data.soalList)
 
   const [search, setSearch] = useState("")
   const [filterUjian, setFilterUjian] = useState("all")
@@ -924,11 +1054,31 @@ export function KelolaSoalClient({ data }: Props) {
     startTransition(async () => {
       try {
         const res = await fetch(`/api/soal/${deleteSoal.id}`, { method: "DELETE" })
-        if (!res.ok) { const err = await res.json(); setDeleteError(err.error || "Gagal menghapus soal"); return }
-        setDeleteSoal(null); router.refresh()
-      } catch { setDeleteError("Terjadi kesalahan, coba lagi") }
+        if (!res.ok) {
+          const err = await res.json()
+          setDeleteError(err.error || "Gagal menghapus soal")
+          return
+        }
+        // ✅ FIX: Update state lokal setelah delete — hapus dari list tanpa router.refresh()
+        setSoalList((prev) => prev.filter((s) => s.id !== deleteSoal.id))
+        setDeleteSoal(null)
+      } catch {
+        setDeleteError("Terjadi kesalahan, coba lagi")
+      }
     })
   }
+
+  // ✅ FIX BUG 1 & 2: onImportSuccess menerima soal baru dan merge ke state lokal
+  const handleImportSuccess = useCallback((newSoal: Soal[]) => {
+    setSoalList((prev) => {
+      // Gabungkan soal lama dengan soal baru, hindari duplikat berdasarkan id
+      const existingIds = new Set(prev.map((s) => s.id))
+      const uniqueNew = newSoal.filter((s) => !existingIds.has(s.id))
+      return [...prev, ...uniqueNew]
+    })
+    // Tetap panggil router.refresh() agar Server Component juga sinkron di background
+    router.refresh()
+  }, [router])
 
   const heroStats = [
     { label: "Total Soal", value: soalList.length, icon: LibraryBig, gradient: "from-teal-500 to-emerald-600", iconBg: "bg-teal-50 dark:bg-teal-950/40", iconColor: "text-teal-600 dark:text-teal-400", valueColor: "text-teal-700 dark:text-teal-300", labelColor: "text-teal-500/70 dark:text-teal-500", borderColor: "border-teal-100 dark:border-teal-900/50" },
@@ -1116,7 +1266,14 @@ export function KelolaSoalClient({ data }: Props) {
       {/* ── Modals ────────────────────────────────────────────────── */}
       <DetailSoalModal soal={detailSoal} onClose={() => setDetailSoal(null)} />
       <DeleteConfirmModal soal={deleteSoal} onClose={() => setDeleteSoal(null)} onConfirm={handleDelete} isPending={isPending} />
-      <ImportSoalModal open={showImport} onClose={() => setShowImport(false)} ujianList={ujianList} onSuccess={() => router.refresh()} />
+
+      {/* ✅ FIX BUG 1 & 2: onSuccess sekarang menerima soal baru dan merge ke state */}
+      <ImportSoalModal
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        ujianList={ujianList}
+        onSuccess={handleImportSuccess}
+      />
 
       {/* ── Error Toast ────────────────────────────────────────────── */}
       {deleteError && (

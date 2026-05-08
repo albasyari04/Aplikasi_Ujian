@@ -1,15 +1,3 @@
-// LOKASI FILE INI: app/api/soal/import-file/route.ts
-// ⚠️  Pastikan folder "import-file" sudah dibuat di dalam app/api/soal/
-// Struktur yang benar:
-//   app/
-//   └── api/
-//       └── soal/
-//           ├── route.ts              ← GET & POST soal biasa
-//           ├── import/
-//           │   └── route.ts          ← POST import dari Excel/CSV (JSON)
-//           └── import-file/          ← ✅ FOLDER INI YANG HARUS DIBUAT
-//               └── route.ts          ← ✅ FILE INI
-
 import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
