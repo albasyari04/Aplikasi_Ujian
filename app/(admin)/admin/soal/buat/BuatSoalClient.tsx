@@ -41,7 +41,7 @@ import {
 } from "lucide-react"
 import { ImportSoalModal } from "../components/ImportSoalModal"
 
-// ─── Interface definitions (MUST be before usage) ───
+// ─── Interface definitions ───
 interface Ujian {
   id: string
   judul: string
@@ -164,7 +164,6 @@ export function BuatSoalClient({ ujianList }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
 
-  // ✅ FIX: State importModalOpen digunakan untuk controlled modal (bukan sebagai trigger children)
   const [importModalOpen, setImportModalOpen] = useState(false)
 
   const [form, setForm] = useState({
@@ -349,7 +348,7 @@ export function BuatSoalClient({ ujianList }: Props) {
             </div>
           </div>
 
-          {/* ✅ FIX: Import Button Row — trigger terpisah dari modal */}
+          {/* Import Button Row */}
           <div className="mt-4 flex justify-end">
             <Button
               type="button"
@@ -363,7 +362,7 @@ export function BuatSoalClient({ ujianList }: Props) {
         </div>
       </div>
 
-      {/* ✅ FIX: ImportSoalModal diletakkan di luar hero banner, controlled via isOpen/onClose */}
+      {/* ImportSoalModal */}
       <ImportSoalModal
         isOpen={importModalOpen}
         onClose={() => setImportModalOpen(false)}
@@ -509,28 +508,22 @@ export function BuatSoalClient({ ujianList }: Props) {
                     value="PILIHAN_GANDA"
                     className="rounded-xl my-0.5 cursor-pointer focus:bg-blue-50 data-[state=checked]:bg-blue-50 hover:bg-slate-50 transition-colors"
                   >
-                    <div className="flex items-center gap-3 py-1">
-                      <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-blue-100 to-blue-50 border border-blue-100 flex items-center justify-center shrink-0 shadow-sm">
+                    <div className="flex items-center gap-2.5 py-1">
+                      <div className="h-8 w-8 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center shrink-0">
                         <CheckSquare className="size-4 text-blue-600" />
                       </div>
-                      <div>
-                        <p className="font-semibold text-slate-800 text-sm leading-tight">Pilihan Ganda</p>
-                        <p className="text-[10px] text-slate-400">A / B / C / D / E</p>
-                      </div>
+                      <span className="font-semibold text-slate-800 text-sm">Pilihan Ganda</span>
                     </div>
                   </SelectItem>
                   <SelectItem
                     value="ESSAY"
                     className="rounded-xl my-0.5 cursor-pointer focus:bg-violet-50 data-[state=checked]:bg-violet-50 hover:bg-slate-50 transition-colors"
                   >
-                    <div className="flex items-center gap-3 py-1">
-                      <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-violet-100 to-violet-50 border border-violet-100 flex items-center justify-center shrink-0 shadow-sm">
+                    <div className="flex items-center gap-2.5 py-1">
+                      <div className="h-8 w-8 rounded-xl bg-violet-50 border border-violet-100 flex items-center justify-center shrink-0">
                         <PenLine className="size-4 text-violet-600" />
                       </div>
-                      <div>
-                        <p className="font-semibold text-slate-800 text-sm leading-tight">Essay</p>
-                        <p className="text-[10px] text-slate-400">Jawaban uraian terbuka</p>
-                      </div>
+                      <span className="font-semibold text-slate-800 text-sm">Essay</span>
                     </div>
                   </SelectItem>
                 </SelectContent>
